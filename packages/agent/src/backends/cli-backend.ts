@@ -1,0 +1,83 @@
+import { spawn, type ChildProcess } from 'child_process';
+import type { AgentBackend, AgentRequest, AgentEvent, AgentEventBase } from '@ccbuddy/core';
+
+export class CliBackend implements AgentBackend {
+  private processes: Map<string, ChildProcess> = new Map();
+
+  async *execute(request: AgentRequest): AsyncGenerator<AgentEvent> {
+    const base: AgentEventBase = {
+      sessionId: request.sessionId,
+      userId: request.userId,
+      channelId: request.channelId,
+      platform: request.platform,
+    };
+
+    const args: string[] = [
+      '-p', request.prompt,
+      '--output-format', 'stream-json',
+      '--session-id', request.sessionId,
+    ];
+
+    if (request.workingDirectory) args.push('--cwd', request.workingDirectory);
+    if (request.permissionLevel === 'chat') args.push('--allowedTools', '');
+
+    try {
+      const result = await this.runClaude(args, request.sessionId);
+      yield { ...base, type: 'complete', response: result };
+    } catch (err) {
+      yield { ...base, type: 'error', error: (err as Error).message };
+    }
+  }
+
+  async abort(sessionId: string): Promise<void> {
+    const proc = this.processes.get(sessionId);
+    if (proc) {
+      proc.kill('SIGTERM');
+      this.processes.delete(sessionId);
+    }
+  }
+
+  private runClaude(args: string[], sessionId: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const proc = spawn('claude', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+      this.processes.set(sessionId, proc);
+
+      let stdout = '';
+      let stderr = '';
+
+      proc.stdout.on('data', (data: Buffer) => { stdout += data.toString(); });
+      proc.stderr.on('data', (data: Buffer) => { stderr += data.toString(); });
+
+      proc.on('close', (code: number | null) => {
+        this.processes.delete(sessionId);
+        if (code !== 0) {
+          reject(new Error(`claude CLI exited with code ${code}: ${stderr}`));
+          return;
+        }
+        try {
+          // stream-json produces NDJSON (one JSON object per line)
+          const lines = stdout.trim().split('\n').filter(Boolean);
+          let responseText = '';
+          for (const line of lines) {
+            try {
+              const obj = JSON.parse(line);
+              if (obj.type === 'result' && obj.result) {
+                responseText = obj.result;
+              } else if (obj.type === 'text' && obj.text) {
+                responseText += obj.text;
+              } else if (obj.type === 'assistant' && obj.message?.content) {
+                const texts = obj.message.content
+                  .filter((b: any) => b.type === 'text')
+                  .map((b: any) => b.text);
+                responseText += texts.join('\n');
+              }
+            } catch { /* skip unparseable lines */ }
+          }
+          resolve(responseText || stdout);
+        } catch {
+          resolve(stdout);
+        }
+      });
+    });
+  }
+}
