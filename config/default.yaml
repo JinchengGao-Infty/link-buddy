@@ -1,0 +1,91 @@
+ccbuddy:
+  data_dir: "./data"
+  log_level: "info"
+
+  # --- Users ---
+  # Define users and their platform IDs here.
+  # Role must be 'admin' or 'chat'.
+  # Example:
+  # users:
+  #   alice:
+  #     name: "Alice"
+  #     role: "admin"
+  #     discord_id: "123456789"
+  #     telegram_id: "987654321"
+  users: {}
+
+  # --- Agent ---
+  agent:
+    backend: "sdk"
+    max_concurrent_sessions: 3
+    session_timeout_minutes: 30
+    queue_max_depth: 10
+    queue_timeout_seconds: 120
+    rate_limits:
+      admin: 30
+      chat: 10
+
+  # --- Memory ---
+  memory:
+    db_path: "./data/memory.sqlite"
+    max_context_tokens: 100000
+    context_threshold: 0.75
+
+  # --- Gateway ---
+  gateway:
+    host: "127.0.0.1"
+    port: 18900
+
+  # --- Platforms ---
+  # Configure platform-specific credentials. Use ${ENV_VAR} for secrets.
+  # Example:
+  # platforms:
+  #   discord:
+  #     token: "${DISCORD_BOT_TOKEN}"
+  #     guild_id: "123456789"
+  #   telegram:
+  #     token: "${TELEGRAM_BOT_TOKEN}"
+  #     chat_id: "${TELEGRAM_CHAT_ID}"
+  platforms: {}
+
+  # --- Scheduler ---
+  scheduler:
+    timezone: "UTC"
+
+  # --- Heartbeat ---
+  heartbeat:
+    interval_seconds: 60
+
+  # --- Webhooks ---
+  webhooks:
+    enabled: false
+    port: 18800
+    # handlers:
+    #   github:
+    #     path: "/webhooks/github"
+    #     secret: "${GITHUB_WEBHOOK_SECRET}"
+
+  # --- Media ---
+  media:
+    max_file_size_mb: 10
+    allowed_mime_types:
+      - "image/jpeg"
+      - "image/png"
+      - "image/gif"
+      - "image/webp"
+      - "application/pdf"
+
+  # --- Image Generation ---
+  image_generation:
+    enabled: false
+    # provider: "openai"
+    # model: "dall-e-3"
+
+  # --- Skills ---
+  skills:
+    directory: "./skills"
+    auto_reload: false
+
+  # --- Apple ---
+  apple:
+    shortcuts_enabled: false
