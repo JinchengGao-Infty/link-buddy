@@ -1,0 +1,12 @@
+{
+  "name": "hello-world",
+  "description": "A simple greeting skill — says hello to the given name",
+  "version": "1.0.0",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "name": { "type": "string", "description": "Name to greet (defaults to 'World')" }
+    }
+  },
+  "permissions": []
+}
