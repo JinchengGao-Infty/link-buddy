@@ -19,7 +19,15 @@ export class CliBackend implements AgentBackend {
     ];
 
     if (request.workingDirectory) args.push('--cwd', request.workingDirectory);
-    if (request.permissionLevel === 'chat') args.push('--allowedTools', '');
+    if (request.permissionLevel === 'chat') {
+      args.push('--allowedTools', '');
+      // Restrict to text-only responses for chat users via system prompt
+      const chatRestriction = 'IMPORTANT: You are in chat-only mode. Do NOT use any tools (no Bash, no file operations, no web searches). Only respond with text.';
+      const effectiveSystemPrompt = request.systemPrompt
+        ? `${request.systemPrompt}\n\n${chatRestriction}`
+        : chatRestriction;
+      args.push('--system-prompt', effectiveSystemPrompt);
+    }
 
     try {
       const result = await this.runClaude(args, request.sessionId);

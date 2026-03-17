@@ -40,6 +40,11 @@ export class SdkBackend implements AgentBackend {
         options.allowDangerouslySkipPermissions = true;
       } else if (request.permissionLevel === 'chat') {
         options.allowedTools = [];
+        // Restrict to text-only responses for chat users
+        const chatRestriction = 'IMPORTANT: You are in chat-only mode. Do NOT use any tools (no Bash, no file operations, no web searches). Only respond with text.';
+        options.systemPrompt = options.systemPrompt
+          ? `${options.systemPrompt}\n\n${chatRestriction}`
+          : chatRestriction;
       }
 
       let fullPrompt = request.prompt;
