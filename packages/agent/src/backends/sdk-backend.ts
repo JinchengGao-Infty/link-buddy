@@ -35,6 +35,12 @@ export class SdkBackend implements AgentBackend {
         options.systemPrompt = request.systemPrompt;
       }
 
+      if (request.mcpServers && request.mcpServers.length > 0) {
+        options.mcpServers = Object.fromEntries(
+          request.mcpServers.map(s => [s.name, { type: 'stdio' as const, command: s.command, args: s.args, env: s.env }])
+        );
+      }
+
       if (request.permissionLevel === 'admin' && this.options.skipPermissions) {
         options.permissionMode = 'bypassPermissions';
         options.allowDangerouslySkipPermissions = true;
