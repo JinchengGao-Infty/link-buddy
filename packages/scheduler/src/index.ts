@@ -5,3 +5,6 @@ export type {
   SchedulerDeps,
   MessageTarget,
 } from './types.js';
+
+export { CronRunner } from './cron-runner.js';
+export type { CronRunnerOptions } from './cron-runner.js';
