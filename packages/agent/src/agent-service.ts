@@ -24,7 +24,7 @@ interface QueuedRequest {
 }
 
 export class AgentService {
-  private readonly backend: AgentBackend;
+  private backend: AgentBackend;
   private readonly eventBus?: EventBus;
   private readonly rateLimiter: RateLimiter;
   private readonly queue: PriorityQueue<QueuedRequest>;
@@ -44,6 +44,10 @@ export class AgentService {
       timeoutMinutes: options.sessionTimeoutMinutes,
       cleanupHours: options.sessionCleanupHours,
     });
+  }
+
+  setBackend(backend: AgentBackend): void {
+    this.backend = backend;
   }
 
   async *handleRequest(request: AgentRequest): AsyncGenerator<AgentEvent> {

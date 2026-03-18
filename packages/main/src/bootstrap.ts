@@ -30,14 +30,8 @@ export async function bootstrap(configDir?: string): Promise<BootstrapResult> {
   // 3. Create UserManager from config users
   const userManager = new UserManager(Object.values(config.users));
 
-  // 4. Create agent backend (SDK is dynamically imported to avoid side effects)
-  let backend;
-  if (config.agent.backend === 'sdk') {
-    const { SdkBackend } = await import('@ccbuddy/agent');
-    backend = new SdkBackend({ skipPermissions: config.agent.admin_skip_permissions });
-  } else {
-    backend = new CliBackend();
-  }
+  // 4. Create agent backend with CLI (SDK loaded lazily after Discord connects)
+  const backend = new CliBackend();
 
   // 5. Create AgentService
   const agentService = new AgentService({
@@ -132,8 +126,16 @@ export async function bootstrap(configDir?: string): Promise<BootstrapResult> {
     database.close();
   });
 
-  // 12. Start gateway
+  // 12. Start gateway (connects Discord/Telegram)
   await gateway.start();
+
+  // 13. Swap in SDK backend if configured (must happen AFTER discord.js connects —
+  //     the SDK module has side effects that suppress discord.js WebSocket events
+  //     if imported before the connection is established)
+  if (config.agent.backend === 'sdk') {
+    const { SdkBackend } = await import('@ccbuddy/agent');
+    agentService.setBackend(new SdkBackend({ skipPermissions: config.agent.admin_skip_permissions }));
+  }
 
   return {
     stop: async () => {
