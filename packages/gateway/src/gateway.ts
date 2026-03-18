@@ -1,0 +1,185 @@
+import type {
+  EventBus,
+  User,
+  IncomingMessage,
+  AgentRequest,
+  AgentEvent,
+  PlatformAdapter,
+  PlatformConfig,
+  GatewayConfig,
+} from '@ccbuddy/core';
+import { chunkMessage } from './chunker.js';
+import { shouldRespond } from './activation.js';
+
+export interface StoreMessageParams {
+  userId: string;
+  sessionId: string;
+  platform: string;
+  content: string;
+  role: 'user' | 'assistant';
+}
+
+export interface GatewayDeps {
+  eventBus: EventBus;
+  findUser: (platform: string, platformId: string) => User | undefined;
+  buildSessionId: (userName: string, platform: string, channelId: string) => string;
+  executeAgentRequest: (request: AgentRequest) => AsyncGenerator<AgentEvent>;
+  assembleContext: (userId: string, sessionId: string) => string;
+  storeMessage: (params: StoreMessageParams) => void;
+  gatewayConfig: GatewayConfig;
+  platformsConfig: PlatformConfig;
+}
+
+const PLATFORM_CHAR_LIMITS: Record<string, number> = {
+  discord: 2000,
+  telegram: 4096,
+};
+
+const DEFAULT_CHAR_LIMIT = 2000;
+
+export class Gateway {
+  private adapters = new Map<string, PlatformAdapter>();
+
+  constructor(private deps: GatewayDeps) {}
+
+  registerAdapter(adapter: PlatformAdapter): void {
+    this.adapters.set(adapter.platform, adapter);
+    adapter.onMessage((msg) => {
+      return this.handleIncomingMessage(msg).catch((err) => {
+        console.error(`[Gateway] Error handling message on ${adapter.platform}:`, err);
+      }) as unknown as void;
+    });
+  }
+
+  getAdapter(platform: string): PlatformAdapter | undefined {
+    return this.adapters.get(platform);
+  }
+
+  async start(): Promise<void> {
+    for (const adapter of this.adapters.values()) {
+      await adapter.start();
+    }
+  }
+
+  async stop(): Promise<void> {
+    for (const adapter of this.adapters.values()) {
+      await adapter.stop();
+    }
+  }
+
+  private async handleIncomingMessage(msg: IncomingMessage): Promise<void> {
+    // 1. Identify user
+    const user = this.deps.findUser(msg.platform, msg.platformUserId);
+    if (!user) {
+      if (this.deps.gatewayConfig.unknown_user_reply) {
+        const adapter = this.adapters.get(msg.platform);
+        await adapter?.sendText(
+          msg.channelId,
+          "I don't recognize you. Ask the admin to add you.",
+        );
+      }
+      return;
+    }
+
+    // 2. Check activation mode
+    if (!shouldRespond(msg, this.deps.platformsConfig)) {
+      return;
+    }
+
+    // 3. Build routing info
+    const sessionId = this.deps.buildSessionId(user.name, msg.platform, msg.channelId);
+
+    // 4. Publish incoming event
+    await this.deps.eventBus.publish('message.incoming', {
+      userId: user.name,
+      sessionId,
+      channelId: msg.channelId,
+      platform: msg.platform,
+      text: msg.text,
+      attachments: msg.attachments,
+      isMention: msg.isMention,
+      replyToMessageId: msg.replyToMessageId,
+      timestamp: Date.now(),
+    });
+
+    // 5. Store user message
+    this.deps.storeMessage({
+      userId: user.name,
+      sessionId,
+      platform: msg.platform,
+      content: msg.text,
+      role: 'user',
+    });
+
+    // 6. Assemble memory context
+    const memoryContext = this.deps.assembleContext(user.name, sessionId);
+
+    // 7. Build agent request
+    const request: AgentRequest = {
+      prompt: msg.text,
+      userId: user.name,
+      sessionId,
+      channelId: msg.channelId,
+      platform: msg.platform,
+      memoryContext,
+      attachments: msg.attachments.length > 0 ? msg.attachments : undefined,
+      // UserConfig only allows 'admin' | 'chat' roles; 'system' is internal-only
+      permissionLevel: user.role === 'admin' ? 'admin' : 'chat',
+    };
+
+    // 8. Execute and route response
+    await this.executeAndRoute(request, msg);
+  }
+
+  private async executeAndRoute(request: AgentRequest, msg: IncomingMessage): Promise<void> {
+    const adapter = this.adapters.get(msg.platform);
+    if (!adapter) return;
+
+    await adapter.setTypingIndicator(msg.channelId, true);
+
+    try {
+      for await (const event of this.deps.executeAgentRequest(request)) {
+        switch (event.type) {
+          case 'complete': {
+            this.deps.storeMessage({
+              userId: request.userId,
+              sessionId: request.sessionId,
+              platform: request.platform,
+              content: event.response,
+              role: 'assistant',
+            });
+
+            await this.deps.eventBus.publish('message.outgoing', {
+              userId: request.userId,
+              sessionId: request.sessionId,
+              channelId: request.channelId,
+              platform: request.platform,
+              text: event.response,
+            });
+
+            const limit = PLATFORM_CHAR_LIMITS[msg.platform] ?? DEFAULT_CHAR_LIMIT;
+            const chunks = chunkMessage(event.response, limit);
+            for (const chunk of chunks) {
+              await adapter.sendText(msg.channelId, chunk);
+            }
+            break;
+          }
+          case 'error':
+            await adapter.sendText(
+              msg.channelId,
+              `Sorry, something went wrong: ${event.error}`,
+            );
+            break;
+          // text and tool_use progress events are published by AgentService directly
+        }
+      }
+    } catch {
+      await adapter.sendText(
+        msg.channelId,
+        'Sorry, something went wrong processing your message.',
+      );
+    } finally {
+      await adapter.setTypingIndicator(msg.channelId, false);
+    }
+  }
+}
