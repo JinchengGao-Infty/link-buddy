@@ -8,3 +8,6 @@ export type {
 
 export { CronRunner } from './cron-runner.js';
 export type { CronRunnerOptions } from './cron-runner.js';
+
+export { HeartbeatMonitor } from './heartbeat.js';
+export type { HeartbeatOptions } from './heartbeat.js';
