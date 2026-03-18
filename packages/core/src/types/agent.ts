@@ -18,6 +18,7 @@ export interface AgentRequest {
   memoryContext?: string;
   attachments?: Attachment[];
   permissionLevel: 'admin' | 'chat' | 'system';
+  mcpServers?: Array<{ name: string; command: string; args: string[]; env?: Record<string, string> }>;
 }
 
 export interface AgentEventBase {

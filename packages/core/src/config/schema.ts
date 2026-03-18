@@ -96,6 +96,7 @@ export interface SkillsConfig {
   sandbox_enabled: boolean;
   require_admin_approval_for_elevated: boolean;
   auto_git_commit: boolean;
+  mcp_server_path?: string;
 }
 
 export interface AppleConfig {
