@@ -15,10 +15,10 @@ skills:
             description: Text description of the image to generate
           aspect_ratio:
             type: string
-            description: "Aspect ratio (default: 1:1). Options: 1:1, 16:9, 9:16, 4:3, 3:4"
+            description: 'Aspect ratio (default: 1:1). Options: 1:1, 16:9, 9:16, 4:3, 3:4'
           size:
             type: string
-            description: "Image size (default: 1K). Options: 512, 1K, 2K"
+            description: 'Image size (default: 1K). Options: 512, 1K, 2K'
         required:
           - prompt
       permissions:
@@ -29,7 +29,29 @@ skills:
       createdBy: system
       createdAt: '2026-03-19T02:35:00.000Z'
       updatedAt: '2026-03-19T02:35:00.000Z'
+      usageCount: 10
+      lastUsed: '2026-03-19T03:07:28.807Z'
+  - definition:
+      name: hacker-news
+      description: >-
+        Fetch the top 20 stories from Hacker News with titles, links, scores,
+        and comment counts.
+      version: 1.0.0
+      source: bundled
+      filePath: skills/bundled/hacker-news.mjs
+      inputSchema:
+        type: object
+        properties: {}
+        required: []
+      permissions:
+        - network
+      enabled: true
+    metadata:
+      createdBy: system
+      createdAt: '2026-03-19T23:00:00.000Z'
+      updatedAt: '2026-03-19T23:00:00.000Z'
       usageCount: 0
+      lastUsed: null
   - definition:
       name: celsius-to-fahrenheit
       description: >-
