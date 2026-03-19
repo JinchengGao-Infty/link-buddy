@@ -1,0 +1,15 @@
+{
+  "name": "generate-image",
+  "description": "Generate an image from a text prompt using Gemini (Nano Banana 2). Returns a PNG image.",
+  "version": "1.0.0",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "prompt": { "type": "string", "description": "Text description of the image to generate" },
+      "aspect_ratio": { "type": "string", "description": "Aspect ratio (default: 1:1). Options: 1:1, 16:9, 9:16, 4:3, 3:4, 3:2, 2:3" },
+      "size": { "type": "string", "description": "Image size (default: 1K). Options: 512, 1K, 2K" }
+    },
+    "required": ["prompt"]
+  },
+  "permissions": ["network", "env"]
+}

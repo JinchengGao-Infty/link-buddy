@@ -1,5 +1,36 @@
 skills:
   - definition:
+      name: generate-image
+      description: >-
+        Generate an image from a text prompt using Gemini (Nano Banana 2).
+        Returns a PNG image.
+      version: 1.0.0
+      source: bundled
+      filePath: skills/bundled/generate-image.mjs
+      inputSchema:
+        type: object
+        properties:
+          prompt:
+            type: string
+            description: Text description of the image to generate
+          aspect_ratio:
+            type: string
+            description: "Aspect ratio (default: 1:1). Options: 1:1, 16:9, 9:16, 4:3, 3:4"
+          size:
+            type: string
+            description: "Image size (default: 1K). Options: 512, 1K, 2K"
+        required:
+          - prompt
+      permissions:
+        - network
+        - env
+      enabled: true
+    metadata:
+      createdBy: system
+      createdAt: '2026-03-19T02:35:00.000Z'
+      updatedAt: '2026-03-19T02:35:00.000Z'
+      usageCount: 0
+  - definition:
       name: celsius-to-fahrenheit
       description: >-
         Converts a temperature from Celsius to Fahrenheit using the formula F =
