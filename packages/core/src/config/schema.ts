@@ -31,6 +31,7 @@ export interface MemoryConfig {
   backup_cron: string;
   backup_dir: string;
   max_backups: number;
+  message_retention_days: number;
 }
 
 export type ActivationMode = 'all' | 'mention';
@@ -180,6 +181,7 @@ export const DEFAULT_CONFIG: CCBuddyConfig = {
     backup_cron: '0 4 * * *',
     backup_dir: './data/backups',
     max_backups: 7,
+    message_retention_days: 30,
   },
   gateway: {
     unknown_user_reply: true,
