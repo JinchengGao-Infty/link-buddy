@@ -9,6 +9,8 @@ import {
   ProfileStore,
   ContextAssembler,
   RetrievalTools,
+  ConsolidationService,
+  BackupService,
 } from '@ccbuddy/memory';
 import { SkillRegistry, MCP_SERVER_PATH } from '@ccbuddy/skills';
 import { Gateway } from '@ccbuddy/gateway';
@@ -67,6 +69,47 @@ export async function bootstrap(configDir?: string): Promise<BootstrapResult> {
   });
 
   const retrievalTools = new RetrievalTools(messageStore, summaryStore);
+
+  // 6b. Create consolidation and backup services
+  const summarize = async (text: string): Promise<string> => {
+    const sessionId = `consolidation:${Date.now()}`;
+    const request: import('@ccbuddy/core').AgentRequest = {
+      prompt: text,
+      userId: 'system',
+      sessionId,
+      channelId: 'internal',
+      platform: 'system',
+      permissionLevel: 'system',
+      systemPrompt: 'You are a summarization engine. Summarize the following conversation preserving key facts, decisions, user preferences, and important context. Be concise but thorough. Output only the summary, no preamble.',
+    };
+
+    const generator = agentService.handleRequest(request);
+    let result = '';
+    for await (const event of generator) {
+      if (event.type === 'complete') {
+        result = event.response;
+        break;
+      }
+      if (event.type === 'error') {
+        throw new Error(`Summarization failed: ${event.error}`);
+      }
+    }
+    return result;
+  };
+
+  const consolidationService = new ConsolidationService({
+    messageStore,
+    summaryStore,
+    database,
+    config: config.memory,
+    summarize,
+  });
+
+  const backupService = new BackupService({
+    database,
+    config: config.memory,
+    eventBus,
+  });
 
   // 7. Create SkillRegistry and register retrieval tools
   const registryPath = join(dirname(config.skills.generated_dir), 'registry.yaml');
@@ -187,6 +230,16 @@ export async function bootstrap(configDir?: string): Promise<BootstrapResult> {
   };
 
   // 15. Create and start scheduler
+  const internalJobs = new Map<string, () => Promise<void>>([
+    ['memory_consolidation', async () => {
+      const results = await consolidationService.runFullConsolidation();
+      for (const [userId, stats] of results) {
+        await eventBus.publish('consolidation.complete', stats);
+      }
+    }],
+    ['memory_backup', () => backupService.backup()],
+  ]);
+
   const schedulerService = new SchedulerService({
     config,
     eventBus,
@@ -215,6 +268,7 @@ export async function bootstrap(configDir?: string): Promise<BootstrapResult> {
         });
       });
     },
+    internalJobs,
   });
 
   shutdownHandler.register('scheduler', async () => {

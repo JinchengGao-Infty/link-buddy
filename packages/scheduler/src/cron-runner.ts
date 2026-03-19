@@ -5,7 +5,7 @@ import type {
   AgentEvent,
   MessageTarget,
 } from '@ccbuddy/core';
-import type { ScheduledJob } from './types.js';
+import type { ScheduledJob, PromptJob, SkillJob, InternalJob } from './types.js';
 
 export interface CronRunnerOptions {
   eventBus: EventBus;
@@ -14,6 +14,7 @@ export interface CronRunnerOptions {
   runSkill?: (name: string, input: Record<string, unknown>) => Promise<string>;
   assembleContext: (userId: string, sessionId: string) => string;
   timezone: string;
+  internalJobs?: Map<string, () => Promise<void>>;
 }
 
 export class CronRunner {
@@ -54,7 +55,9 @@ export class CronRunner {
 
     job.running = true;
     try {
-      if (job.type === 'skill') {
+      if (job.type === 'internal') {
+        await this.executeInternalJob(job);
+      } else if (job.type === 'skill') {
         await this.executeSkillJob(job);
       } else {
         await this.executePromptJob(job);
@@ -72,7 +75,7 @@ export class CronRunner {
     this.jobs.clear();
   }
 
-  private async executePromptJob(job: ScheduledJob): Promise<void> {
+  private async executePromptJob(job: PromptJob): Promise<void> {
     const sessionId = `scheduler:cron:${job.name}:${Date.now()}`;
     const memoryContext = this.opts.assembleContext(job.user, sessionId);
 
@@ -105,7 +108,7 @@ export class CronRunner {
     }
   }
 
-  private async executeSkillJob(job: ScheduledJob): Promise<void> {
+  private async executeSkillJob(job: SkillJob): Promise<void> {
     if (!this.opts.runSkill) {
       await this.handleError(job, 'runSkill not configured');
       return;
@@ -121,7 +124,7 @@ export class CronRunner {
     }
   }
 
-  private async handleError(job: ScheduledJob, error: string): Promise<void> {
+  private async handleError(job: PromptJob | SkillJob, error: string): Promise<void> {
     await this.opts.sendProactiveMessage(
       job.target,
       `Scheduled job "${job.name}" failed: ${error}`,
@@ -129,7 +132,7 @@ export class CronRunner {
     await this.publishComplete(job, false);
   }
 
-  private async publishComplete(job: ScheduledJob, success: boolean): Promise<void> {
+  private async publishComplete(job: PromptJob | SkillJob, success: boolean): Promise<void> {
     await this.opts.eventBus.publish('scheduler.job.complete', {
       jobName: job.name,
       source: 'cron',
@@ -137,5 +140,41 @@ export class CronRunner {
       target: job.target,
       timestamp: Date.now(),
     });
+  }
+
+  private async executeInternalJob(job: InternalJob): Promise<void> {
+    const callback = this.opts.internalJobs?.get(job.name);
+    if (!callback) {
+      console.error(`[Scheduler] Internal job "${job.name}" has no registered callback`);
+      await this.opts.eventBus.publish('scheduler.job.complete', {
+        jobName: job.name,
+        source: 'cron' as const,
+        success: false,
+        target: { platform: 'system', channel: 'internal' },
+        timestamp: Date.now(),
+      });
+      return;
+    }
+
+    try {
+      await callback();
+      await this.opts.eventBus.publish('scheduler.job.complete', {
+        jobName: job.name,
+        source: 'cron' as const,
+        success: true,
+        target: { platform: 'system', channel: 'internal' },
+        timestamp: Date.now(),
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[Scheduler] Internal job "${job.name}" failed:`, message);
+      await this.opts.eventBus.publish('scheduler.job.complete', {
+        jobName: job.name,
+        source: 'cron' as const,
+        success: false,
+        target: { platform: 'system', channel: 'internal' },
+        timestamp: Date.now(),
+      });
+    }
   }
 }

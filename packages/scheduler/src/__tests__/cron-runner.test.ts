@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { AgentEvent, AgentRequest, MessageTarget, EventBus } from '@ccbuddy/core';
-import type { ScheduledJob } from '../types.js';
+import type { PromptJob, SkillJob, InternalJob } from '../types.js';
 
 const { mockSchedule, mockValidate } = vi.hoisted(() => ({
   mockSchedule: vi.fn(() => ({ stop: vi.fn() })),
@@ -22,7 +22,7 @@ function createMockTarget(): MessageTarget {
   return { platform: 'discord', channel: 'general' };
 }
 
-function createMockJob(overrides: Partial<ScheduledJob> = {}): ScheduledJob {
+function createMockJob(overrides: Partial<PromptJob> = {}): PromptJob {
   return {
     name: 'daily-report',
     cron: '0 9 * * *',
@@ -181,7 +181,11 @@ describe('CronRunner', () => {
     it('calls runSkill instead of executeAgentRequest', async () => {
       const deps = createMockDeps();
       const runner = new CronRunner(deps);
-      const job = createMockJob({ type: 'skill', payload: 'check-health' });
+      const job: SkillJob = {
+        ...createMockJob(),
+        type: 'skill',
+        payload: 'check-health',
+      };
 
       await runner.executeJob(job);
 
@@ -283,6 +287,56 @@ describe('CronRunner', () => {
       runner.stop();
 
       expect(mockTask.stop).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('internal jobs', () => {
+    it('executes internal job callback', async () => {
+      const callback = vi.fn(async () => {});
+      const internalJobs = new Map([['cleanup', callback]]);
+
+      const deps = createMockDeps();
+      const runner = new CronRunner({ ...deps, internalJobs });
+
+      const job: InternalJob = {
+        name: 'cleanup',
+        cron: '0 3 * * *',
+        type: 'internal',
+        enabled: true,
+        nextRun: 0,
+        running: false,
+      };
+
+      runner.registerJob(job);
+      await runner.executeJob(job);
+
+      expect(callback).toHaveBeenCalledOnce();
+      expect(deps.eventBus.publish).toHaveBeenCalledWith(
+        'scheduler.job.complete',
+        expect.objectContaining({ jobName: 'cleanup', success: true }),
+      );
+    });
+
+    it('logs error when internal job callback is not registered', async () => {
+      const deps = createMockDeps();
+      const runner = new CronRunner({ ...deps, internalJobs: new Map() });
+
+      const job: InternalJob = {
+        name: 'missing',
+        cron: '0 3 * * *',
+        type: 'internal',
+        enabled: true,
+        nextRun: 0,
+        running: false,
+      };
+
+      runner.registerJob(job);
+      await runner.executeJob(job);
+
+      expect(deps.eventBus.publish).toHaveBeenCalledWith(
+        'scheduler.job.complete',
+        expect.objectContaining({ jobName: 'missing', success: false }),
+      );
     });
   });
 });

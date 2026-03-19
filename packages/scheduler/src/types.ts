@@ -6,20 +6,37 @@ import type {
   CCBuddyConfig,
 } from '@ccbuddy/core';
 
-export interface ScheduledJob {
+export interface BaseJob {
   name: string;
   cron: string;
-  type: 'prompt' | 'skill';
-  payload: string;
-  user: string;
-  target: MessageTarget;
-  permissionLevel: 'admin' | 'system';
   enabled: boolean;
   nextRun: number;
   lastRun?: number;
   running: boolean;
   timezone?: string;
 }
+
+export interface PromptJob extends BaseJob {
+  type: 'prompt';
+  payload: string;
+  user: string;
+  target: MessageTarget;
+  permissionLevel: 'admin' | 'system';
+}
+
+export interface SkillJob extends BaseJob {
+  type: 'skill';
+  payload: string;
+  user: string;
+  target: MessageTarget;
+  permissionLevel: 'admin' | 'system';
+}
+
+export interface InternalJob extends BaseJob {
+  type: 'internal';
+}
+
+export type ScheduledJob = PromptJob | SkillJob | InternalJob;
 
 export interface TriggerResult {
   source: 'cron' | 'heartbeat' | 'webhook';
@@ -45,6 +62,7 @@ export interface SchedulerDeps {
   checkDatabase: () => Promise<boolean>;
   checkAgent: () => Promise<{ reachable: boolean; durationMs: number }>;
   assembleContext: (userId: string, sessionId: string) => string;
+  internalJobs?: Map<string, () => Promise<void>>;
 }
 
 export type { MessageTarget };

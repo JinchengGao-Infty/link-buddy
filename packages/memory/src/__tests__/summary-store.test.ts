@@ -229,4 +229,36 @@ describe('SummaryStore', () => {
       expect(store.getById(id2)).toBeUndefined();
     });
   });
+
+  describe('getUncondensedByDepth()', () => {
+    it('returns nodes at given depth where condensed_at is null', () => {
+      store.add({ userId: 'u1', depth: 0, content: 'summary-a', sourceIds: [1, 2], tokens: 100 });
+      store.add({ userId: 'u1', depth: 0, content: 'summary-b', sourceIds: [3, 4], tokens: 100 });
+      store.add({ userId: 'u1', depth: 1, content: 'condensed', sourceIds: [1], tokens: 50 });
+      const nodes = store.getUncondensedByDepth('u1', 0);
+      expect(nodes).toHaveLength(2);
+      expect(nodes[0].content).toBe('summary-a');
+      expect(nodes[1].content).toBe('summary-b');
+    });
+
+    it('excludes already-condensed nodes', () => {
+      const id1 = store.add({ userId: 'u1', depth: 0, content: 'a', sourceIds: [1], tokens: 100 });
+      store.add({ userId: 'u1', depth: 0, content: 'b', sourceIds: [2], tokens: 100 });
+      store.markCondensed([id1], Date.now());
+      const nodes = store.getUncondensedByDepth('u1', 0);
+      expect(nodes).toHaveLength(1);
+      expect(nodes[0].content).toBe('b');
+    });
+  });
+
+  describe('markCondensed()', () => {
+    it('sets condensed_at on specified nodes', () => {
+      const id1 = store.add({ userId: 'u1', depth: 0, content: 'a', sourceIds: [1], tokens: 100 });
+      const id2 = store.add({ userId: 'u1', depth: 0, content: 'b', sourceIds: [2], tokens: 100 });
+      const now = Date.now();
+      store.markCondensed([id1, id2], now);
+      const nodes = store.getUncondensedByDepth('u1', 0);
+      expect(nodes).toHaveLength(0);
+    });
+  });
 });

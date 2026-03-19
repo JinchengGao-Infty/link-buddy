@@ -116,6 +116,39 @@ export class MessageStore {
     return row.count;
   }
 
+  getDistinctUserIds(): string[] {
+    const rows = this.db.raw().prepare(
+      'SELECT DISTINCT user_id FROM messages'
+    ).all() as Array<{ user_id: string }>;
+    return rows.map(r => r.user_id);
+  }
+
+  getUnsummarizedMessages(userId: string, excludeRecent: number): StoredMessage[] {
+    const rows = this.db.raw().prepare(`
+      SELECT * FROM messages
+      WHERE user_id = ? AND summarized_at IS NULL
+      ORDER BY timestamp ASC, id ASC
+    `).all(userId) as any[];
+
+    const cutoff = Math.max(0, rows.length - excludeRecent);
+    return rows.slice(0, cutoff).map((r: any) => this.toMessage(r));
+  }
+
+  markSummarized(ids: number[], timestamp: number): void {
+    if (ids.length === 0) return;
+    const placeholders = ids.map(() => '?').join(',');
+    this.db.raw().prepare(
+      `UPDATE messages SET summarized_at = ? WHERE id IN (${placeholders})`
+    ).run(timestamp, ...ids);
+  }
+
+  pruneOldSummarized(beforeTimestamp: number): number {
+    const result = this.db.raw().prepare(
+      'DELETE FROM messages WHERE summarized_at IS NOT NULL AND summarized_at < ?'
+    ).run(beforeTimestamp);
+    return result.changes;
+  }
+
   private toMessage(row: any): StoredMessage {
     return {
       id: row.id,

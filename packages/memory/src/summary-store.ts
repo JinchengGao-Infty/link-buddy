@@ -93,6 +93,23 @@ export class SummaryStore {
     ).run(id);
   }
 
+  getUncondensedByDepth(userId: string, depth: number): SummaryNode[] {
+    const rows = this.db.raw().prepare(`
+      SELECT * FROM summary_nodes
+      WHERE user_id = ? AND depth = ? AND condensed_at IS NULL
+      ORDER BY timestamp ASC, id ASC
+    `).all(userId, depth);
+    return rows.map((r: any) => this.toNode(r));
+  }
+
+  markCondensed(ids: number[], timestamp: number): void {
+    if (ids.length === 0) return;
+    const placeholders = ids.map(() => '?').join(',');
+    this.db.raw().prepare(
+      `UPDATE summary_nodes SET condensed_at = ? WHERE id IN (${placeholders})`
+    ).run(timestamp, ...ids);
+  }
+
   private toNode(row: any): SummaryNode {
     return {
       id: row.id,

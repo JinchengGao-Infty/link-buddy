@@ -1,7 +1,7 @@
 import { CronRunner } from './cron-runner.js';
 import { HeartbeatMonitor } from './heartbeat.js';
 import { WebhookServer } from './webhook-server.js';
-import type { SchedulerDeps, ScheduledJob } from './types.js';
+import type { SchedulerDeps, ScheduledJob, InternalJob } from './types.js';
 
 export class SchedulerService {
   private cronRunner: CronRunner;
@@ -19,11 +19,13 @@ export class SchedulerService {
       runSkill: deps.runSkill,
       timezone: deps.config.scheduler.timezone,
       assembleContext: deps.assembleContext,
+      internalJobs: deps.internalJobs,
     });
   }
 
   async start(): Promise<void> {
     this.registerCronJobs();
+    this.registerInternalJobs();
     this.startHeartbeat();
     await this.startWebhooks();
     console.log('[Scheduler] Started');
@@ -65,6 +67,40 @@ export class SchedulerService {
         timezone: jobConfig.timezone,
       };
 
+      this.jobs.push(job);
+      this.cronRunner.registerJob(job);
+    }
+  }
+
+  private registerInternalJobs(): void {
+    if (!this.deps.internalJobs) return;
+
+    const memConfig = this.deps.config.memory;
+
+    if (memConfig.consolidation_cron) {
+      const job: InternalJob = {
+        name: 'memory_consolidation',
+        cron: memConfig.consolidation_cron,
+        type: 'internal',
+        enabled: true,
+        nextRun: 0,
+        running: false,
+        timezone: this.deps.config.scheduler.timezone,
+      };
+      this.jobs.push(job);
+      this.cronRunner.registerJob(job);
+    }
+
+    if (memConfig.backup_cron) {
+      const job: InternalJob = {
+        name: 'memory_backup',
+        cron: memConfig.backup_cron,
+        type: 'internal',
+        enabled: true,
+        nextRun: 0,
+        running: false,
+        timezone: this.deps.config.scheduler.timezone,
+      };
       this.jobs.push(job);
       this.cronRunner.registerJob(job);
     }

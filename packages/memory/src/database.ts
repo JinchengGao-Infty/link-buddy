@@ -47,6 +47,17 @@ export class MemoryDatabase {
         PRIMARY KEY (user_id, key)
       );
     `);
+
+    // Migrations — add consolidation columns if missing
+    const messagesCols = this.db.pragma('table_info(messages)') as Array<{ name: string }>;
+    if (!messagesCols.some(c => c.name === 'summarized_at')) {
+      this.db.exec('ALTER TABLE messages ADD COLUMN summarized_at INTEGER');
+    }
+
+    const summaryCols = this.db.pragma('table_info(summary_nodes)') as Array<{ name: string }>;
+    if (!summaryCols.some(c => c.name === 'condensed_at')) {
+      this.db.exec('ALTER TABLE summary_nodes ADD COLUMN condensed_at INTEGER');
+    }
   }
 
   raw(): Database.Database {

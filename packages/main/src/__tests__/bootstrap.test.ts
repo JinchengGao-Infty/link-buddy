@@ -37,6 +37,8 @@ const mockSummaryStore = vi.fn();
 const mockProfileStore = vi.fn();
 const mockContextAssembler = vi.fn();
 const mockRetrievalTools = vi.fn();
+const mockConsolidationService = vi.fn();
+const mockBackupService = vi.fn();
 
 vi.mock('@ccbuddy/memory', () => ({
   MemoryDatabase: function (this: unknown, ...args: unknown[]) {
@@ -56,6 +58,12 @@ vi.mock('@ccbuddy/memory', () => ({
   },
   RetrievalTools: function (this: unknown, ...args: unknown[]) {
     return mockRetrievalTools(...args);
+  },
+  ConsolidationService: function (this: unknown, ...args: unknown[]) {
+    return mockConsolidationService(...args);
+  },
+  BackupService: function (this: unknown, ...args: unknown[]) {
+    return mockBackupService(...args);
   },
 }));
 
@@ -133,6 +141,15 @@ function makeConfig(overrides: Record<string, unknown> = {}) {
       max_context_tokens: 100000,
       context_threshold: 0.75,
       fresh_tail_count: 32,
+      leaf_chunk_tokens: 20000,
+      leaf_target_tokens: 1200,
+      condensed_target_tokens: 2000,
+      max_expand_tokens: 4000,
+      consolidation_cron: '0 3 * * *',
+      backup_cron: '0 4 * * *',
+      backup_dir: './data/backups',
+      max_backups: 7,
+      message_retention_days: 30,
     },
     gateway: {
       unknown_user_reply: true,
@@ -157,6 +174,10 @@ function makeConfig(overrides: Record<string, unknown> = {}) {
     webhooks: {
       enabled: false,
       port: 18800,
+    },
+    media: {
+      max_file_size_mb: 10,
+      allowed_mime_types: ['image/jpeg', 'image/png'],
     },
     users: {
       alice: { name: 'alice', role: 'admin', discord_id: 'discord-alice' },
@@ -271,6 +292,14 @@ describe('bootstrap', () => {
     mockProfileStore.mockReturnValue(fakeProfileStoreInstance);
     mockContextAssembler.mockReturnValue(fakeContextAssemblerInstance);
     mockRetrievalTools.mockReturnValue(fakeRetrievalToolsInstance);
+    mockConsolidationService.mockReturnValue({
+      consolidate: vi.fn(),
+      runFullConsolidation: vi.fn().mockResolvedValue(new Map()),
+    });
+    mockBackupService.mockReturnValue({
+      backup: vi.fn().mockResolvedValue(undefined),
+      rotateBackups: vi.fn().mockResolvedValue(undefined),
+    });
     mockSkillRegistry.mockReturnValue(fakeSkillRegistryInstance);
     mockGateway.mockReturnValue(fakeGatewayInstance);
     mockDiscordAdapter.mockReturnValue(fakeDiscordAdapterInstance);
@@ -328,12 +357,12 @@ describe('bootstrap', () => {
 
   it('creates DiscordAdapter with the discord token', async () => {
     await bootstrap('/config');
-    expect(mockDiscordAdapter).toHaveBeenCalledWith({ token: 'discord-token-123' });
+    expect(mockDiscordAdapter).toHaveBeenCalledWith(expect.objectContaining({ token: 'discord-token-123' }));
   });
 
   it('creates TelegramAdapter with the telegram token', async () => {
     await bootstrap('/config');
-    expect(mockTelegramAdapter).toHaveBeenCalledWith({ token: 'telegram-token-456' });
+    expect(mockTelegramAdapter).toHaveBeenCalledWith(expect.objectContaining({ token: 'telegram-token-456' }));
   });
 
   it('calls Gateway.registerAdapter twice (discord + telegram)', async () => {

@@ -79,6 +79,23 @@ export interface SchedulerJobCompleteEvent {
   timestamp: number;
 }
 
+export interface ConsolidationStats {
+  userId: string;
+  messagesChunked: number;
+  leafNodesCreated: number;
+  condensedNodesCreated: number;
+  messagesPruned: number;
+}
+
+export interface BackupCompleteEvent {
+  path: string;
+}
+
+export interface BackupIntegrityFailedEvent {
+  path: string;
+  error: string;
+}
+
 export interface EventMap {
   'message.incoming': IncomingMessageEvent;
   'message.outgoing': OutgoingMessageEvent;
@@ -88,6 +105,9 @@ export interface EventMap {
   'webhook.received': WebhookEvent;
   'agent.progress': AgentProgressEvent;
   'scheduler.job.complete': SchedulerJobCompleteEvent;
+  'consolidation.complete': ConsolidationStats;
+  'backup.complete': BackupCompleteEvent;
+  'backup.integrity_failed': BackupIntegrityFailedEvent;
 }
 
 export interface EventBus {

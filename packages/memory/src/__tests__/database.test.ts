@@ -72,3 +72,35 @@ describe('MemoryDatabase', () => {
     expect(row?.content).toBe('hello');
   });
 });
+
+describe('schema migrations', () => {
+  let tmpDir: string;
+  let dbPath: string;
+  let db: MemoryDatabase;
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'ccbuddy-db-test-'));
+    dbPath = join(tmpDir, 'test.db');
+    db = new MemoryDatabase(dbPath);
+    db.init();
+  });
+
+  afterEach(() => {
+    db.close();
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('adds summarized_at column to messages table', () => {
+    const cols = db.raw().pragma('table_info(messages)') as Array<{ name: string }>;
+    expect(cols.some(c => c.name === 'summarized_at')).toBe(true);
+  });
+
+  it('adds condensed_at column to summary_nodes table', () => {
+    const cols = db.raw().pragma('table_info(summary_nodes)') as Array<{ name: string }>;
+    expect(cols.some(c => c.name === 'condensed_at')).toBe(true);
+  });
+
+  it('is idempotent — calling init() twice does not throw', () => {
+    expect(() => db.init()).not.toThrow();
+  });
+});

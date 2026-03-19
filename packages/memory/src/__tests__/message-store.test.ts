@@ -219,4 +219,87 @@ describe('MessageStore', () => {
       expect(store.getMessageCount('u1')).toBe(2);
     });
   });
+
+  describe('getDistinctUserIds()', () => {
+    it('returns unique user IDs', () => {
+      store.add({ userId: 'u1', sessionId: 's1', platform: 'discord', content: 'a', role: 'user' });
+      store.add({ userId: 'u2', sessionId: 's2', platform: 'discord', content: 'b', role: 'user' });
+      store.add({ userId: 'u1', sessionId: 's3', platform: 'discord', content: 'c', role: 'user' });
+      const ids = store.getDistinctUserIds();
+      expect(ids).toHaveLength(2);
+      expect(ids).toContain('u1');
+      expect(ids).toContain('u2');
+    });
+
+    it('returns empty array when no messages', () => {
+      expect(store.getDistinctUserIds()).toEqual([]);
+    });
+  });
+
+  describe('getUnsummarizedMessages()', () => {
+    it('returns unsummarized messages excluding recent N', () => {
+      for (let i = 0; i < 5; i++) {
+        store.add({ userId: 'u1', sessionId: 's1', platform: 'discord', content: `msg-${i}`, role: 'user', timestamp: 1000 + i });
+      }
+      const msgs = store.getUnsummarizedMessages('u1', 2);
+      expect(msgs).toHaveLength(3);
+      expect(msgs[0].content).toBe('msg-0');
+      expect(msgs[2].content).toBe('msg-2');
+    });
+
+    it('returns empty when all messages are within recent count', () => {
+      store.add({ userId: 'u1', sessionId: 's1', platform: 'discord', content: 'a', role: 'user' });
+      expect(store.getUnsummarizedMessages('u1', 5)).toEqual([]);
+    });
+
+    it('excludes already-summarized messages', () => {
+      const id1 = store.add({ userId: 'u1', sessionId: 's1', platform: 'discord', content: 'old', role: 'user', timestamp: 1000 });
+      store.add({ userId: 'u1', sessionId: 's1', platform: 'discord', content: 'new', role: 'user', timestamp: 2000 });
+      store.markSummarized([id1], Date.now());
+      const msgs = store.getUnsummarizedMessages('u1', 0);
+      expect(msgs).toHaveLength(1);
+      expect(msgs[0].content).toBe('new');
+    });
+
+    it('works across multiple sessions', () => {
+      store.add({ userId: 'u1', sessionId: 's1', platform: 'discord', content: 'a', role: 'user', timestamp: 1000 });
+      store.add({ userId: 'u1', sessionId: 's2', platform: 'discord', content: 'b', role: 'user', timestamp: 2000 });
+      store.add({ userId: 'u1', sessionId: 's3', platform: 'discord', content: 'c', role: 'user', timestamp: 3000 });
+      const msgs = store.getUnsummarizedMessages('u1', 1);
+      expect(msgs).toHaveLength(2);
+      expect(msgs[0].content).toBe('a');
+      expect(msgs[1].content).toBe('b');
+    });
+  });
+
+  describe('markSummarized()', () => {
+    it('sets summarized_at on specified messages', () => {
+      const id1 = store.add({ userId: 'u1', sessionId: 's1', platform: 'discord', content: 'a', role: 'user' });
+      const id2 = store.add({ userId: 'u1', sessionId: 's1', platform: 'discord', content: 'b', role: 'user' });
+      const now = Date.now();
+      store.markSummarized([id1, id2], now);
+      const msgs = store.getUnsummarizedMessages('u1', 0);
+      expect(msgs).toHaveLength(0);
+    });
+  });
+
+  describe('pruneOldSummarized()', () => {
+    it('deletes summarized messages older than threshold', () => {
+      const id1 = store.add({ userId: 'u1', sessionId: 's1', platform: 'discord', content: 'old', role: 'user' });
+      const id2 = store.add({ userId: 'u1', sessionId: 's1', platform: 'discord', content: 'new', role: 'user' });
+      store.markSummarized([id1], 1000);
+      store.markSummarized([id2], Date.now());
+      const deleted = store.pruneOldSummarized(Date.now() - 1000);
+      expect(deleted).toBe(1);
+      expect(store.getById(id1)).toBeUndefined();
+      expect(store.getById(id2)).toBeTruthy();
+    });
+
+    it('does not delete unsummarized messages', () => {
+      const id1 = store.add({ userId: 'u1', sessionId: 's1', platform: 'discord', content: 'keep', role: 'user' });
+      const deleted = store.pruneOldSummarized(Date.now());
+      expect(deleted).toBe(0);
+      expect(store.getById(id1)).toBeTruthy();
+    });
+  });
 });

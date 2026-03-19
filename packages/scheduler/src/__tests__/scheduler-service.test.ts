@@ -57,6 +57,7 @@ function createMinimalConfig(overrides: Partial<CCBuddyConfig> = {}): CCBuddyCon
       backup_cron: '0 4 * * *',
       backup_dir: './data/backups',
       max_backups: 7,
+      message_retention_days: 90,
     },
     gateway: {
       unknown_user_reply: true,
@@ -179,7 +180,9 @@ describe('SchedulerService', () => {
 
     const jobs = service.getJobs();
     expect(jobs.length).toBe(1);
-    expect(jobs[0].target).toEqual({ platform: 'discord', channel: '999' });
+    const job = jobs[0];
+    if (job.type === 'internal') throw new Error('Expected a prompt or skill job');
+    expect(job.target).toEqual({ platform: 'discord', channel: '999' });
   });
 
   it('does not start webhook server when webhooks disabled', async () => {
