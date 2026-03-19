@@ -15,8 +15,17 @@ export class CliBackend implements AgentBackend {
       platform: request.platform,
     };
 
+    let attachmentNote = '';
+    if (request.attachments && request.attachments.length > 0) {
+      console.warn('[CliBackend] Attachments not supported in CLI mode — including metadata only');
+      attachmentNote = request.attachments.map(a => {
+        const sizeKB = Math.round(a.data.byteLength / 1024);
+        return `[Attached: ${a.mimeType} "${a.filename ?? 'unnamed'}" (${sizeKB}KB)]`;
+      }).join('\n') + '\n\n';
+    }
+
     const args: string[] = [
-      '-p', request.prompt,
+      '-p', attachmentNote + request.prompt,
       '--output-format', 'stream-json',
       '--verbose',
     ];
