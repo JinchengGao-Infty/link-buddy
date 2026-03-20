@@ -201,6 +201,9 @@ export class Gateway {
     const adapter = this.adapters.get(msg.platform);
     if (!adapter) return;
 
+    // Snapshot outbound dir before execution so we only deliver files produced by THIS request
+    const preExistingFiles = this.snapshotOutboundDir();
+
     await adapter.setTypingIndicator(msg.channelId, true);
 
     try {
@@ -256,7 +259,7 @@ export class Gateway {
             }
 
             // Deliver any outbound media files (written by skills to data/outbound/)
-            await this.deliverOutboundMedia(adapter, msg.channelId);
+            await this.deliverOutboundMedia(adapter, msg.channelId, preExistingFiles);
             break;
           }
           case 'media': {
@@ -288,13 +291,23 @@ export class Gateway {
     }
   }
 
-  private async deliverOutboundMedia(adapter: PlatformAdapter, channelId: string): Promise<void> {
+  private snapshotOutboundDir(): Set<string> {
+    const dir = this.deps.outboundMediaDir;
+    if (!dir) return new Set();
+    try {
+      return new Set(readdirSync(dir));
+    } catch {
+      return new Set();
+    }
+  }
+
+  private async deliverOutboundMedia(adapter: PlatformAdapter, channelId: string, preExisting: Set<string>): Promise<void> {
     const dir = this.deps.outboundMediaDir;
     if (!dir) return;
 
     let files: string[];
     try {
-      files = readdirSync(dir).filter(f => !f.startsWith('.'));
+      files = readdirSync(dir).filter(f => !f.startsWith('.') && !preExisting.has(f));
     } catch {
       return; // dir doesn't exist yet — no media to send
     }
