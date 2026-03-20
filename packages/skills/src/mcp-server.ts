@@ -109,11 +109,19 @@ async function main(): Promise<void> {
 
   // 1b. Optionally wire memory retrieval tools
   let retrievalTools: RetrievalTools | null = null;
+  let memoryDatabase: MemoryDatabase | null = null;
   if (args.memoryDbPath) {
-    const memoryDatabase = new MemoryDatabase(args.memoryDbPath, { readonly: true });
+    memoryDatabase = new MemoryDatabase(args.memoryDbPath, { readonly: true });
     const messageStore = new MessageStore(memoryDatabase);
     const summaryStore = new SummaryStore(memoryDatabase);
     retrievalTools = new RetrievalTools(messageStore, summaryStore);
+
+    // Register cleanup handlers for database shutdown
+    if (memoryDatabase) {
+      process.on('exit', () => memoryDatabase?.close());
+      process.on('SIGTERM', () => { memoryDatabase?.close(); process.exit(0); });
+      process.on('SIGINT', () => { memoryDatabase?.close(); process.exit(0); });
+    }
   }
 
   // 1c. Optionally wire Apple calendar tools
