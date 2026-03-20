@@ -27,7 +27,8 @@ export interface BootstrapResult {
 export async function bootstrap(configDir?: string): Promise<BootstrapResult> {
   // 1. Load config
   const resolvedConfigDir = configDir ?? process.cwd();
-  const config = loadConfig(resolvedConfigDir);
+  const configFileDir = join(resolvedConfigDir, 'config');
+  const config = loadConfig(configFileDir);
 
   // 2. Create event bus
   const eventBus = createEventBus();
