@@ -24,6 +24,7 @@ ccbuddy:
     rate_limits:
       admin: 30
       chat: 10
+      system: 20
     default_working_directory: "~"
     admin_skip_permissions: true
     session_cleanup_hours: 24
@@ -44,6 +45,7 @@ ccbuddy:
     backup_cron: "0 4 * * *"
     backup_dir: "./data/backups"
     max_backups: 7
+    message_retention_days: 30
 
   # --- Gateway ---
   gateway:
@@ -103,4 +105,4 @@ ccbuddy:
 
   # --- Apple ---
   apple:
-    shortcuts_enabled: false
+    enabled: false
