@@ -44,7 +44,18 @@ const DEFAULT_CHAR_LIMIT = 2000;
 export class Gateway {
   private adapters = new Map<string, PlatformAdapter>();
 
-  constructor(private deps: GatewayDeps) {}
+  constructor(private deps: GatewayDeps) {
+    // Subscribe to session conflict events for user notification
+    deps.eventBus.subscribe('session.conflict', (event) => {
+      const adapter = this.adapters.get(event.platform);
+      if (adapter) {
+        const msg = `Another session is using this directory — your request has been queued and will run when it's free.`;
+        adapter.sendText(event.channelId, msg).catch((err) => {
+          console.error(`[Gateway] Failed to send conflict notification:`, err);
+        });
+      }
+    });
+  }
 
   registerAdapter(adapter: PlatformAdapter): void {
     this.adapters.set(adapter.platform, adapter);

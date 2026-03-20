@@ -1,9 +1,11 @@
+import { resolve as resolvePath } from 'node:path';
 import type { AgentBackend, AgentRequest, AgentEvent, AgentEventBase, EventBus } from '@ccbuddy/core';
 import { RateLimiter } from './session/rate-limiter.js';
 import { PriorityQueue } from './session/priority-queue.js';
 import { SessionManager } from './session/session-manager.js';
 import type { Session } from './session/session-manager.js';
 import type { QueuePriority } from './session/priority-queue.js';
+import { DirectoryLock } from './session/directory-lock.js';
 
 export interface AgentServiceOptions {
   backend: AgentBackend;
@@ -32,6 +34,12 @@ export class AgentService {
   private readonly maxConcurrent: number;
   private readonly queueTimeoutSeconds: number;
   private activeConcurrent = 0;
+  private readonly directoryLock = new DirectoryLock();
+  private readonly directoryQueue = new Map<string, Array<{
+    resolve: () => void;
+    reject: (err: Error) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }>>();
 
   constructor(options: AgentServiceOptions) {
     this.backend = options.backend;
@@ -64,10 +72,40 @@ export class AgentService {
       return;
     }
 
+    // Directory lock — wait if another session is using the same directory
+    if (request.workingDirectory) {
+      const lockResult = this.directoryLock.acquire(
+        request.workingDirectory, request.sessionId, request.userId,
+      );
+      if (!lockResult.acquired) {
+        // Notify about conflict
+        if (this.eventBus) {
+          void this.eventBus.publish('session.conflict', {
+            userId: request.userId,
+            sessionId: request.sessionId,
+            channelId: request.channelId,
+            platform: request.platform,
+            workingDirectory: request.workingDirectory,
+            conflictingSessionId: lockResult.heldBy?.sessionId,
+          });
+        }
+
+        // Wait for lock to be released
+        const acquired = await this.waitForDirectoryLock(request);
+        if (!acquired) {
+          yield { ...base, type: 'error', error: 'directory busy — request timed out' };
+          return;
+        }
+      }
+    }
+
     // Check concurrency — queue if at cap, reject if queue also full
     if (this.activeConcurrent >= this.maxConcurrent) {
       const queued = await this.tryEnqueue(request);
       if (!queued) {
+        if (request.workingDirectory) {
+          this.directoryLock.release(request.workingDirectory, request.sessionId);
+        }
         yield { ...base, type: 'error', error: 'server busy' };
         return;
       }
@@ -96,6 +134,11 @@ export class AgentService {
       }
     } finally {
       this.activeConcurrent -= 1;
+      // Release directory lock and drain directory queue
+      if (request.workingDirectory) {
+        this.directoryLock.release(request.workingDirectory, request.sessionId);
+        this.drainDirectoryQueue(request.workingDirectory);
+      }
       this.drainQueue();
     }
   }
@@ -126,6 +169,46 @@ export class AgentService {
         queued.reject(new Error('queue timeout'));
       }, this.queueTimeoutSeconds * 1000);
     });
+  }
+
+  private waitForDirectoryLock(request: AgentRequest): Promise<boolean> {
+    return new Promise<boolean>((promiseResolve) => {
+      const dir = resolvePath(request.workingDirectory!);
+      const entry = {
+        resolve: () => {
+          clearTimeout(entry.timer);
+          const result = this.directoryLock.acquire(dir, request.sessionId, request.userId);
+          promiseResolve(result.acquired);
+        },
+        reject: () => promiseResolve(false),
+        timer: setTimeout(() => {
+          const queue = this.directoryQueue.get(dir);
+          if (queue) {
+            const idx = queue.indexOf(entry);
+            if (idx !== -1) queue.splice(idx, 1);
+            if (queue.length === 0) this.directoryQueue.delete(dir);
+          }
+          promiseResolve(false);
+        }, this.queueTimeoutSeconds * 1000),
+      };
+
+      if (!this.directoryQueue.has(dir)) {
+        this.directoryQueue.set(dir, []);
+      }
+      this.directoryQueue.get(dir)!.push(entry);
+    });
+  }
+
+  private drainDirectoryQueue(workingDirectory: string): void {
+    const dir = resolvePath(workingDirectory);
+    const queue = this.directoryQueue.get(dir);
+    if (!queue || queue.length === 0) return;
+
+    const next = queue.shift()!;
+    if (queue.length === 0) this.directoryQueue.delete(dir);
+
+    clearTimeout(next.timer);
+    next.resolve();
   }
 
   private drainQueue(): void {

@@ -110,6 +110,106 @@ describe('AgentService', () => {
     expect(backend.abort).toHaveBeenCalledWith('test-session');
   });
 
+  describe('directory conflict detection', () => {
+    it('acquires lock for request with workingDirectory', async () => {
+      const service = new AgentService({ ...defaultOpts, backend: makeBackend('done') });
+      const events = await collectEvents(
+        service.handleRequest(makeRequest({ workingDirectory: '/project' })),
+      );
+      expect(events[0].type).toBe('complete');
+    });
+
+    it('queues second request to same directory then completes both', async () => {
+      const service = new AgentService({
+        ...defaultOpts,
+        backend: makeBackend('done', 50),
+      });
+
+      const gen1 = service.handleRequest(makeRequest({
+        sessionId: 'session-1',
+        workingDirectory: '/project',
+      }));
+      const gen2 = service.handleRequest(makeRequest({
+        sessionId: 'session-2',
+        workingDirectory: '/project',
+      }));
+
+      const [events1, events2] = await Promise.all([
+        collectEvents(gen1),
+        collectEvents(gen2),
+      ]);
+
+      expect(events1[0].type).toBe('complete');
+      expect(events2[0].type).toBe('complete');
+    });
+
+    it('skips lock for requests without workingDirectory', async () => {
+      const service = new AgentService({ ...defaultOpts, backend: makeBackend('done') });
+      const events = await collectEvents(
+        service.handleRequest(makeRequest({ workingDirectory: undefined })),
+      );
+      expect(events[0].type).toBe('complete');
+    });
+
+    it('publishes session.conflict event when queued', async () => {
+      const eventBus = createEventBus();
+      const conflicts: unknown[] = [];
+      eventBus.subscribe('session.conflict', (e) => conflicts.push(e));
+
+      const service = new AgentService({
+        ...defaultOpts,
+        backend: makeBackend('done', 50),
+        eventBus,
+      });
+
+      const gen1 = service.handleRequest(makeRequest({
+        sessionId: 'session-1',
+        workingDirectory: '/project',
+      }));
+      const gen2 = service.handleRequest(makeRequest({
+        sessionId: 'session-2',
+        workingDirectory: '/project',
+      }));
+
+      await Promise.all([collectEvents(gen1), collectEvents(gen2)]);
+
+      expect(conflicts).toHaveLength(1);
+      expect((conflicts[0] as any).sessionId).toBe('session-2');
+    });
+
+    it('releases lock on error so next request proceeds', async () => {
+      let callCount = 0;
+      const backend = {
+        async *execute(req: AgentRequest): AsyncGenerator<AgentEvent> {
+          const base = {
+            sessionId: req.sessionId, userId: req.userId,
+            channelId: req.channelId, platform: req.platform,
+          };
+          callCount++;
+          if (callCount === 1) {
+            yield { ...base, type: 'error' as const, error: 'first fails' };
+          } else {
+            yield { ...base, type: 'complete' as const, response: 'second ok' };
+          }
+        },
+        abort: vi.fn(),
+      };
+
+      const service = new AgentService({ ...defaultOpts, backend });
+
+      await collectEvents(service.handleRequest(makeRequest({
+        sessionId: 'session-1',
+        workingDirectory: '/project',
+      })));
+
+      const events2 = await collectEvents(service.handleRequest(makeRequest({
+        sessionId: 'session-2',
+        workingDirectory: '/project',
+      })));
+      expect(events2[0].type).toBe('complete');
+    });
+  });
+
   it('queue timeout: timed-out item is removed from queue and resolves false', async () => {
     vi.useFakeTimers();
 

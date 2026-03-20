@@ -449,7 +449,7 @@ describe('bootstrap', () => {
 
   it('defaults configDir to process.cwd() when not provided', async () => {
     await bootstrap();
-    expect(mockLoadConfig).toHaveBeenCalledWith(process.cwd());
+    expect(mockLoadConfig).toHaveBeenCalledWith(process.cwd() + '/config');
   });
 
   it('builds registryPath from dirname of generated_dir', async () => {

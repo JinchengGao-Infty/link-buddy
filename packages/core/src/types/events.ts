@@ -34,7 +34,8 @@ export interface SessionConflictEvent {
   channelId: string;
   platform: string;
   workingDirectory: string;
-  conflictingPid: number;
+  conflictingPid?: number;
+  conflictingSessionId?: string;
 }
 
 export interface HealthAlertEvent {

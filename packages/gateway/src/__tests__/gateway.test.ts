@@ -201,6 +201,57 @@ describe('Gateway', () => {
     });
   });
 
+  describe('session.conflict event handling', () => {
+    it('sends queued notification to the correct channel when conflict event fires', async () => {
+      gateway.registerAdapter(adapter);
+
+      // Retrieve the handler registered via subscribe
+      const subscribeCalls = (deps.eventBus.subscribe as ReturnType<typeof vi.fn>).mock.calls as unknown[][];
+      const subscribeCall = subscribeCalls.find((call) => call[0] === 'session.conflict');
+      expect(subscribeCall).toBeDefined();
+      const conflictHandler = subscribeCall![1] as (payload: unknown) => void;
+
+      conflictHandler({
+        userId: 'user-1',
+        sessionId: 'session-1',
+        channelId: 'dev',
+        platform: 'discord',
+        workingDirectory: '/project',
+        conflictingPid: 0,
+      });
+
+      // Allow any microtasks/promises to settle
+      await Promise.resolve();
+
+      expect(adapter.sendText).toHaveBeenCalledWith(
+        'dev',
+        expect.stringContaining('queued'),
+      );
+    });
+
+    it('does nothing when conflict event fires for an unknown platform', async () => {
+      // adapter is discord; conflict event comes in for telegram
+      gateway.registerAdapter(adapter);
+
+      const subscribeCalls2 = (deps.eventBus.subscribe as ReturnType<typeof vi.fn>).mock.calls as unknown[][];
+      const subscribeCall = subscribeCalls2.find((call) => call[0] === 'session.conflict');
+      const conflictHandler = subscribeCall![1] as (payload: unknown) => void;
+
+      conflictHandler({
+        userId: 'user-1',
+        sessionId: 'session-1',
+        channelId: 'dev',
+        platform: 'telegram',
+        workingDirectory: '/project',
+        conflictingPid: 0,
+      });
+
+      await Promise.resolve();
+
+      expect(adapter.sendText).not.toHaveBeenCalled();
+    });
+  });
+
   describe('agent execution and response routing', () => {
     beforeEach(() => {
       gateway.registerAdapter(adapter);
