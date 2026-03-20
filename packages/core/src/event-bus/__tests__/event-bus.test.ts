@@ -51,4 +51,33 @@ describe('EventBus', () => {
     await bus.publish('alert.health', { module: 'test', status: 'down', message: 'test', timestamp: Date.now() });
     // Should not throw
   });
+
+  it('catches and logs errors from async handlers without throwing', async () => {
+    const bus = createEventBus();
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const asyncErrorHandler = vi.fn().mockRejectedValue(new Error('async handler failure'));
+    bus.subscribe('alert.health', asyncErrorHandler);
+    await expect(
+      bus.publish('alert.health', { module: 'test', status: 'down', message: 'test', timestamp: Date.now() }),
+    ).resolves.toBeUndefined();
+    expect(asyncErrorHandler).toHaveBeenCalledOnce();
+    expect(consoleSpy).toHaveBeenCalledWith(
+      expect.stringContaining('handler error for "alert.health"'),
+      expect.any(Error),
+    );
+    consoleSpy.mockRestore();
+  });
+
+  it('continues calling remaining handlers after an async handler rejects', async () => {
+    const bus = createEventBus();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const asyncErrorHandler = vi.fn().mockRejectedValue(new Error('first handler fails'));
+    const laterHandler = vi.fn();
+    bus.subscribe('alert.health', asyncErrorHandler);
+    bus.subscribe('alert.health', laterHandler);
+    await bus.publish('alert.health', { module: 'test', status: 'down', message: 'test', timestamp: Date.now() });
+    expect(asyncErrorHandler).toHaveBeenCalledOnce();
+    expect(laterHandler).toHaveBeenCalledOnce();
+    vi.restoreAllMocks();
+  });
 });
