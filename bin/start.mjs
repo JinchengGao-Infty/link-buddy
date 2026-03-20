@@ -16,7 +16,22 @@ const origLog = console.log;
 const origErr = console.error;
 console.log = (...a) => { log(a.join(' ')); origLog(...a); };
 console.error = (...a) => { log('ERR: ' + a.join(' ')); origErr(...a); };
-process.on('unhandledRejection', (err) => { log('UNHANDLED: ' + (err?.stack || err)); });
+process.on('uncaughtException', (err) => {
+  // grammy throws 409 as uncaught exception from polling loop — don't crash
+  if (err?.error_code === 409 || err?.message?.includes('409')) {
+    log('WARN: Telegram 409 conflict (non-fatal, polling will retry)');
+    return;
+  }
+  log('FATAL: ' + (err?.stack || err));
+  process.exit(1);
+});
+process.on('unhandledRejection', (err) => {
+  if (err?.error_code === 409 || err?.message?.includes('409')) {
+    log('WARN: Telegram 409 rejection (non-fatal)');
+    return;
+  }
+  log('UNHANDLED: ' + (err?.stack || err));
+});
 
 log('Starting Link Buddy...');
 const { bootstrap } = await import('../packages/main/dist/bootstrap.js');

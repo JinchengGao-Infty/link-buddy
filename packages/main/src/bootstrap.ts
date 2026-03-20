@@ -227,16 +227,17 @@ export async function bootstrap(configDir?: string): Promise<BootstrapResult> {
     database.close();
   });
 
-  // 12. Start gateway (connects Discord/Telegram)
-  await gateway.start();
-
-  // 13. Swap in SDK backend if configured (must happen AFTER discord.js connects —
-  //     the SDK module has side effects that suppress discord.js WebSocket events
-  //     if imported before the connection is established)
+  // 12. Swap in SDK backend if configured (moved before gateway.start() since
+  //     we don't use Discord — the original delay was to avoid discord.js side effects)
   if (config.agent.backend === 'sdk') {
     const { SdkBackend } = await import('@ccbuddy/agent');
     agentService.setBackend(new SdkBackend({ skipPermissions: config.agent.admin_skip_permissions }));
   }
+
+  // 13. Start gateway (connects Telegram — note: bot.start() never resolves, it runs polling loop)
+  gateway.start().catch((err: Error) => {
+    console.error('[Bootstrap] Gateway start error:', err.message);
+  });
 
   // 14. Create proactive sender closure
   const sendProactiveMessage = async (target: { platform: string; channel: string }, text: string) => {

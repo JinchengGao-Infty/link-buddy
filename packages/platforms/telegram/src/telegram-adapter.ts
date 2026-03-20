@@ -14,6 +14,9 @@ export class TelegramAdapter implements PlatformAdapter {
 
   constructor(private config: TelegramAdapterConfig) {
     this.bot = new Bot(config.token);
+    this.bot.catch((err) => {
+      console.error('[TelegramAdapter] Bot error (non-fatal):', err.message);
+    });
   }
 
   onMessage(handler: (msg: IncomingMessage) => void): void {
@@ -108,7 +111,26 @@ export class TelegramAdapter implements PlatformAdapter {
       });
     });
 
-    await this.bot.start();
+    const startWithRetry = async (retries = 5) => {
+      for (let i = 0; i < retries; i++) {
+        try {
+          await this.bot.start({
+            onStart: () => console.log('[TelegramAdapter] Bot polling started'),
+            allowed_updates: ['message'],
+            drop_pending_updates: true,
+          });
+          return;
+        } catch (err: any) {
+          if (err?.error_code === 409 && i < retries - 1) {
+            console.log(`[TelegramAdapter] 409 conflict, retrying in ${(i + 1) * 3}s... (${i + 1}/${retries})`);
+            await new Promise(r => setTimeout(r, (i + 1) * 3000));
+            continue;
+          }
+          throw err;
+        }
+      }
+    };
+    await startWithRetry();
   }
 
   async stop(): Promise<void> {
@@ -117,6 +139,22 @@ export class TelegramAdapter implements PlatformAdapter {
 
   async sendText(channelId: string, text: string): Promise<void> {
     await this.bot.api.sendMessage(Number(channelId), text);
+  }
+
+  async sendTextReturningId(channelId: string, text: string): Promise<string> {
+    const msg = await this.bot.api.sendMessage(Number(channelId), text);
+    return String(msg.message_id);
+  }
+
+  async editMessageText(channelId: string, messageId: string, text: string): Promise<void> {
+    try {
+      await this.bot.api.editMessageText(Number(channelId), Number(messageId), text);
+    } catch (err) {
+      // Telegram returns 400 if text is unchanged — ignore
+      if (!(err as any)?.description?.includes('message is not modified')) {
+        throw err;
+      }
+    }
   }
 
   async sendImage(channelId: string, image: Buffer, caption?: string): Promise<void> {
@@ -141,9 +179,23 @@ export class TelegramAdapter implements PlatformAdapter {
     );
   }
 
+  private typingIntervals = new Map<string, ReturnType<typeof setInterval>>();
+
   async setTypingIndicator(channelId: string, active: boolean): Promise<void> {
-    if (!active) return;
-    await this.bot.api.sendChatAction(Number(channelId), 'typing');
+    if (active) {
+      // Send immediately, then repeat every 4s (Telegram typing expires after 5s)
+      const send = () => this.bot.api.sendChatAction(Number(channelId), 'typing').catch(() => {});
+      await send();
+      if (!this.typingIntervals.has(channelId)) {
+        this.typingIntervals.set(channelId, setInterval(send, 4000));
+      }
+    } else {
+      const interval = this.typingIntervals.get(channelId);
+      if (interval) {
+        clearInterval(interval);
+        this.typingIntervals.delete(channelId);
+      }
+    }
   }
 
   private async downloadAndDispatch(opts: {

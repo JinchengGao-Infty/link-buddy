@@ -122,10 +122,20 @@ export interface ScheduledJobConfig {
   timezone?: string;
 }
 
+export interface HeartbeatJobConfig {
+  enabled?: boolean;
+  cron: string;
+  user: string;
+  target?: MessageTarget;
+  active_hours?: { start: string; end: string };
+  heartbeat_file?: string;
+}
+
 export interface SchedulerConfig {
   timezone: string;
   default_target?: MessageTarget;
   jobs?: Record<string, ScheduledJobConfig>;
+  heartbeat?: HeartbeatJobConfig;
 }
 
 export interface UserConfig {

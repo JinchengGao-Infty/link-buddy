@@ -206,9 +206,33 @@ export class Gateway {
 
     await adapter.setTypingIndicator(msg.channelId, true);
 
+    // Tool status tracking for live-editing a status message
+    let statusMessageId: string | undefined;
+    const toolLog: string[] = [];
+
     try {
       for await (const event of this.deps.executeAgentRequest(request)) {
         switch (event.type) {
+          case 'tool_use': {
+            const label = this.formatToolLabel(event.tool, event.input);
+            toolLog.push(`🔧 ${label}...`);
+            statusMessageId = await this.upsertStatusMessage(adapter, msg.channelId, statusMessageId, toolLog);
+            break;
+          }
+          case 'tool_result': {
+            // Replace last pending "..." entry with summary
+            if (toolLog.length > 0) {
+              const last = toolLog[toolLog.length - 1];
+              if (last.endsWith('...')) {
+                const summary = event.summary
+                  ? event.summary.slice(0, 80).replace(/\n/g, ' ')
+                  : '';
+                toolLog[toolLog.length - 1] = last.replace('...', summary ? ` ✓ ${summary}` : ' ✓');
+              }
+            }
+            statusMessageId = await this.upsertStatusMessage(adapter, msg.channelId, statusMessageId, toolLog);
+            break;
+          }
           case 'complete': {
             this.deps.storeMessage({
               userId: request.userId,
@@ -278,7 +302,6 @@ export class Gateway {
               `Sorry, something went wrong: ${event.error}`,
             );
             break;
-          // text and tool_use progress events are published by AgentService directly
         }
       }
     } catch {
@@ -289,6 +312,62 @@ export class Gateway {
     } finally {
       await adapter.setTypingIndicator(msg.channelId, false);
     }
+  }
+
+  /** Send or edit a single status message showing tool execution progress. */
+  private async upsertStatusMessage(
+    adapter: PlatformAdapter,
+    channelId: string,
+    existingId: string | undefined,
+    toolLog: string[],
+  ): Promise<string | undefined> {
+    const text = toolLog.join('\n');
+    if (!text) return existingId;
+
+    try {
+      if (existingId && adapter.editMessageText) {
+        await adapter.editMessageText(channelId, existingId, text);
+        return existingId;
+      }
+      if (adapter.sendTextReturningId) {
+        return await adapter.sendTextReturningId(channelId, text);
+      }
+    } catch (err) {
+      console.warn('[Gateway] Failed to upsert status message:', (err as Error).message);
+    }
+    return existingId;
+  }
+
+  private readonly TOOL_LABELS: Record<string, string> = {
+    Bash: '💻',
+    Read: '📖',
+    Edit: '📝',
+    Write: '📝',
+    Glob: '🔍',
+    Grep: '🔍',
+    WebFetch: '🌐',
+    WebSearch: '🌐',
+    create_skill: '⚡',
+    read_calendar: '📅',
+    create_reminder: '📋',
+  };
+
+  private formatToolLabel(tool: string, input?: Record<string, unknown>): string {
+    const emoji = this.TOOL_LABELS[tool] ?? '🔧';
+    // Extract a short detail from input
+    let detail = '';
+    if (input) {
+      if (typeof input.command === 'string') {
+        detail = input.command.slice(0, 40);
+      } else if (typeof input.file_path === 'string') {
+        detail = input.file_path.split('/').pop() ?? '';
+      } else if (typeof input.pattern === 'string') {
+        detail = input.pattern.slice(0, 30);
+      } else if (typeof input.query === 'string') {
+        detail = input.query.slice(0, 30);
+      }
+    }
+    return detail ? `${emoji} ${tool}: ${detail}` : `${emoji} ${tool}`;
   }
 
   private snapshotOutboundDir(): Set<string> {

@@ -26,6 +26,7 @@ export class SchedulerService {
   async start(): Promise<void> {
     this.registerCronJobs();
     this.registerInternalJobs();
+    this.registerHeartbeatJob();
     this.startHeartbeat();
     await this.startWebhooks();
     console.log('[Scheduler] Started');
@@ -104,6 +105,19 @@ export class SchedulerService {
       this.jobs.push(job);
       this.cronRunner.registerJob(job);
     }
+  }
+
+  private registerHeartbeatJob(): void {
+    const hbConfig = this.deps.config.scheduler.heartbeat;
+    if (!hbConfig) return;
+
+    const target = hbConfig.target ?? this.deps.config.scheduler.default_target;
+    if (!target) {
+      console.warn('[Scheduler] Heartbeat job has no target — skipping');
+      return;
+    }
+
+    this.cronRunner.registerHeartbeat({ ...hbConfig, target });
   }
 
   private startHeartbeat(): void {

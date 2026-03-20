@@ -1,0 +1,74 @@
+link_buddy:
+  users:
+    you:
+      name: "YourName"
+      role: "admin"
+      telegram_id: "YOUR_TELEGRAM_ID"
+
+  agent:
+    backend: "sdk"
+    max_concurrent_sessions: 3
+    session_timeout_minutes: 30
+    rate_limits:
+      admin: 30
+      system: 20
+    default_working_directory: "~"
+    admin_skip_permissions: true
+
+  memory:
+    db_path: "./data/memory.sqlite"
+    max_context_tokens: 150000
+    fresh_tail_count: 64
+    consolidation_cron: "0 3 * * *"
+    # Optional: Memory Palace for long-term memory
+    # memory_palace:
+    #   sse_url: "http://localhost:8765"
+    #   api_key: "your-api-key"
+
+  platforms:
+    telegram:
+      enabled: true
+      token: "YOUR_BOT_TOKEN_FROM_BOTFATHER"
+
+  scheduler:
+    timezone: "Your/Timezone"
+    default_target:
+      platform: "telegram"
+      channel: "YOUR_TELEGRAM_ID"
+    jobs:
+      morning_briefing:
+        cron: "0 8 * * *"
+        prompt: "Check my calendar for today, list pending reminders, summarize briefly."
+        user: "you"
+        permission_level: "admin"
+      evening_briefing:
+        cron: "0 22 * * *"
+        prompt: "Review what I did today, preview tomorrow's calendar."
+        user: "you"
+        permission_level: "admin"
+    heartbeat:
+      enabled: true
+      cron: "*/30 * * * *"
+      user: "you"
+      active_hours:
+        start: "09:00"
+        end: "23:00"
+      heartbeat_file: "./HEARTBEAT.md"
+
+  # Optional: Webhook endpoints for external callbacks
+  # webhooks:
+  #   enabled: true
+  #   port: 18800
+  #   endpoints:
+  #     hydra:
+  #       path: "/hydra"
+  #       prompt_template: "Agent completed a task.\n\nEvent: {{event_type}}\nPayload:\n{{payload}}"
+  #       user: "you"
+
+  apple:
+    enabled: true
+
+  skills:
+    sandbox_enabled: true
+    require_admin_approval_for_elevated: true
+    auto_git_commit: true

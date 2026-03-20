@@ -99,9 +99,28 @@ export class SdkBackend implements AgentBackend {
 
       const result = query({ prompt, options });
 
+      // Track active tools to avoid duplicate yields
+      const activeTools = new Set<string>();
       let responseText = '';
       for await (const msg of result) {
-        if (msg.type === 'result') {
+        if (msg.type === 'assistant') {
+          // Extract tool_use blocks from assistant message content
+          const content = (msg as any).message?.content;
+          if (Array.isArray(content)) {
+            for (const block of content) {
+              if (block.type === 'tool_use' && !activeTools.has(block.id)) {
+                activeTools.add(block.id);
+                yield { ...base, type: 'tool_use', tool: block.name, input: block.input };
+              }
+            }
+          }
+        } else if (msg.type === 'tool_use_summary') {
+          const summary = (msg as any).summary ?? '';
+          // Extract tool name from summary (format: "Tool: name\n...")
+          const toolIds: string[] = (msg as any).preceding_tool_use_ids ?? [];
+          for (const id of toolIds) activeTools.delete(id);
+          yield { ...base, type: 'tool_result', tool: '', summary };
+        } else if (msg.type === 'result') {
           if ((msg as any).subtype === 'success') {
             responseText = (msg as any).result ?? '';
           } else {

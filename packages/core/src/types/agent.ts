@@ -35,7 +35,8 @@ export interface AgentEventBase {
 
 export type AgentEvent =
   | AgentEventBase & { type: 'text'; content: string }
-  | AgentEventBase & { type: 'tool_use'; tool: string }
+  | AgentEventBase & { type: 'tool_use'; tool: string; input?: Record<string, unknown> }
+  | AgentEventBase & { type: 'tool_result'; tool: string; summary: string }
   | AgentEventBase & { type: 'complete'; response: string }
   | AgentEventBase & { type: 'error'; error: string }
   | AgentEventBase & { type: 'media'; media: Array<{ data: Buffer; mimeType: string; filename?: string }> };
