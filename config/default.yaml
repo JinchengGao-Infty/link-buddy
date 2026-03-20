@@ -1,4 +1,4 @@
-ccbuddy:
+link_buddy:
   data_dir: "./data"
   log_level: "info"
 
@@ -34,9 +34,9 @@ ccbuddy:
   # --- Memory ---
   memory:
     db_path: "./data/memory.sqlite"
-    max_context_tokens: 100000
+    max_context_tokens: 150000
     context_threshold: 0.75
-    fresh_tail_count: 32
+    fresh_tail_count: 64
     leaf_chunk_tokens: 20000
     leaf_target_tokens: 1200
     condensed_target_tokens: 2000
@@ -53,14 +53,6 @@ ccbuddy:
 
   # --- Platforms ---
   # Configure in config/local.yaml with ${ENV_VAR} for secrets.
-  # Example:
-  # platforms:
-  #   discord:
-  #     enabled: true
-  #     token: "${DISCORD_BOT_TOKEN}"
-  #     channels:
-  #       "channel-id":
-  #         mode: "all"    # or "mention"
   platforms: {}
 
   # --- Scheduler ---

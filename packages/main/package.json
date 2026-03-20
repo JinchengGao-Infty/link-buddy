@@ -18,7 +18,6 @@
     "@ccbuddy/memory": "*",
     "@ccbuddy/skills": "*",
     "@ccbuddy/gateway": "*",
-    "@ccbuddy/platform-discord": "*",
     "@ccbuddy/platform-telegram": "*",
     "@ccbuddy/orchestrator": "*",
     "@ccbuddy/scheduler": "*"

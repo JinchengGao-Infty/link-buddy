@@ -115,11 +115,12 @@ export function loadConfig(configDir: string): CCBuddyConfig {
     if (!existsSync(filePath)) continue;
 
     const raw = readFileSync(filePath, 'utf-8');
-    const parsed = yaml.load(raw) as { ccbuddy?: Partial<CCBuddyConfig> } | null;
-    if (parsed?.ccbuddy) {
+    const parsed = yaml.load(raw) as { link_buddy?: Partial<CCBuddyConfig>; ccbuddy?: Partial<CCBuddyConfig> } | null;
+    const section = parsed?.link_buddy ?? parsed?.ccbuddy;
+    if (section) {
       config = deepMerge(
         config as unknown as Record<string, unknown>,
-        parsed.ccbuddy as Record<string, unknown>,
+        section as Record<string, unknown>,
       ) as unknown as CCBuddyConfig;
     }
   }

@@ -47,7 +47,6 @@ export interface PlatformAdapterConfig {
 }
 
 export interface PlatformConfig {
-  discord?: PlatformAdapterConfig;
   telegram?: PlatformAdapterConfig;
   [key: string]: PlatformAdapterConfig | undefined;
 }

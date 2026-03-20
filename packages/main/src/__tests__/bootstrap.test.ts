@@ -78,14 +78,6 @@ vi.mock('@ccbuddy/skills', () => ({
 
 const mockGateway = vi.fn();
 
-const mockDiscordAdapter = vi.fn();
-
-vi.mock('@ccbuddy/platform-discord', () => ({
-  DiscordAdapter: function (this: unknown, ...args: unknown[]) {
-    return mockDiscordAdapter(...args);
-  },
-}));
-
 const mockTelegramAdapter = vi.fn();
 
 vi.mock('@ccbuddy/platform-telegram', () => ({
@@ -155,7 +147,6 @@ function makeConfig(overrides: Record<string, unknown> = {}) {
       unknown_user_reply: true,
     },
     platforms: {
-      discord: { enabled: true, token: 'discord-token-123' },
       telegram: { enabled: true, token: 'telegram-token-456' },
     },
     data_dir: './data',
@@ -226,7 +217,6 @@ describe('bootstrap', () => {
     start: ReturnType<typeof vi.fn>;
     stop: ReturnType<typeof vi.fn>;
   };
-  let fakeDiscordAdapterInstance: object;
   let fakeTelegramAdapterInstance: object;
   let fakeShutdownHandlerInstance: {
     register: ReturnType<typeof vi.fn>;
@@ -276,7 +266,6 @@ describe('bootstrap', () => {
       start: vi.fn().mockResolvedValue(undefined),
       stop: vi.fn().mockResolvedValue(undefined),
     };
-    fakeDiscordAdapterInstance = {};
     fakeTelegramAdapterInstance = {};
     fakeShutdownHandlerInstance = {
       register: vi.fn(),
@@ -305,7 +294,6 @@ describe('bootstrap', () => {
     });
     mockSkillRegistry.mockReturnValue(fakeSkillRegistryInstance);
     mockGateway.mockReturnValue(fakeGatewayInstance);
-    mockDiscordAdapter.mockReturnValue(fakeDiscordAdapterInstance);
     mockTelegramAdapter.mockReturnValue(fakeTelegramAdapterInstance);
     mockShutdownHandler.mockReturnValue(fakeShutdownHandlerInstance);
     mockSchedulerService.mockReturnValue({
@@ -358,34 +346,20 @@ describe('bootstrap', () => {
     expect(toolNames).toContain('memory_expand');
   });
 
-  it('creates DiscordAdapter with the discord token', async () => {
-    await bootstrap('/config');
-    expect(mockDiscordAdapter).toHaveBeenCalledWith(expect.objectContaining({ token: 'discord-token-123' }));
-  });
-
   it('creates TelegramAdapter with the telegram token', async () => {
     await bootstrap('/config');
     expect(mockTelegramAdapter).toHaveBeenCalledWith(expect.objectContaining({ token: 'telegram-token-456' }));
   });
 
-  it('calls Gateway.registerAdapter twice (discord + telegram)', async () => {
+  it('calls Gateway.registerAdapter once (telegram)', async () => {
     await bootstrap('/config');
-    expect(fakeGatewayInstance.registerAdapter).toHaveBeenCalledTimes(2);
-    expect(fakeGatewayInstance.registerAdapter).toHaveBeenCalledWith(fakeDiscordAdapterInstance);
+    expect(fakeGatewayInstance.registerAdapter).toHaveBeenCalledTimes(1);
     expect(fakeGatewayInstance.registerAdapter).toHaveBeenCalledWith(fakeTelegramAdapterInstance);
   });
 
   it('calls Gateway.start()', async () => {
     await bootstrap('/config');
     expect(fakeGatewayInstance.start).toHaveBeenCalled();
-  });
-
-  it('does not create Discord adapter when disabled', async () => {
-    const cfg = makeConfig();
-    cfg.platforms.discord = { enabled: false, token: 'discord-token-123' };
-    mockLoadConfig.mockReturnValue(cfg);
-    await bootstrap('/config');
-    expect(mockDiscordAdapter).not.toHaveBeenCalled();
   });
 
   it('does not create Telegram adapter when token is missing', async () => {
