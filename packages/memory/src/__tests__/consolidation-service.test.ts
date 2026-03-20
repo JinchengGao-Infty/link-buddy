@@ -128,6 +128,45 @@ describe('ConsolidationService', () => {
       const stats = await service.consolidate('u1');
       expect(stats.condensedNodesCreated).toBe(0);
     });
+
+    it('chunks large batches of uncondensed nodes by condensed_target_tokens', async () => {
+      // condensed_target_tokens = 100; each node is 60 tokens, so 60 + 60 = 120 > 100
+      // means each chunk holds exactly 1 node. 6 depth-0 nodes → 6 depth-1 nodes.
+      // The 6 depth-1 nodes then condense further (6 >= 4 threshold), producing
+      // at least 1 depth-2 node. Total condensedNodesCreated >= 7.
+      const cfg = makeConfig({ condensed_target_tokens: 100 });
+      const svc = new ConsolidationService({
+        messageStore,
+        summaryStore,
+        database: db,
+        config: cfg,
+        summarize,
+      });
+
+      for (let i = 0; i < 6; i++) {
+        summaryStore.add({
+          userId: 'u2', depth: 0, content: `leaf-${i}`,
+          sourceIds: [100 + i], tokens: 60,
+        });
+      }
+
+      const stats = await svc.consolidate('u2');
+
+      // 6 depth-0 chunks each produce one depth-1 node
+      const depth1 = summaryStore.getByDepth('u2', 1);
+      expect(depth1).toHaveLength(6);
+
+      // All depth-0 nodes must be marked condensed
+      const remaining = summaryStore.getUncondensedByDepth('u2', 0);
+      expect(remaining).toHaveLength(0);
+
+      // condensedNodesCreated is at least 6 (from depth-0 chunking),
+      // plus however many higher-level nodes the cascade produces
+      expect(stats.condensedNodesCreated).toBeGreaterThanOrEqual(6);
+
+      // summarize was called at least once per depth-0 chunk
+      expect(summarize.mock.calls.length).toBeGreaterThanOrEqual(6);
+    });
   });
 
   describe('runFullConsolidation() — Retention Pruning', () => {

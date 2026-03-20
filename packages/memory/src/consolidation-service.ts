@@ -119,23 +119,44 @@ export class ConsolidationService {
       const uncondensed = this.summaryStore.getUncondensedByDepth(userId, depth);
       if (uncondensed.length < 4) break;
 
-      const text = uncondensed.map(n => n.content).join('\n\n---\n\n');
-      const summary = await this.summarize(text);
-      const sourceIds = uncondensed.map(n => n.id);
-      const now = Date.now();
+      // Batch uncondensed nodes by token budget to prevent oversized summarization calls
+      const chunks: typeof uncondensed[] = [];
+      let currentChunk: typeof uncondensed = [];
+      let currentTokens = 0;
 
-      this.database.transaction(() => {
-        this.summaryStore.add({
-          userId,
-          depth: depth + 1,
-          content: summary,
-          sourceIds,
-          tokens: estimateTokens(summary),
+      for (const node of uncondensed) {
+        if (currentTokens + node.tokens > this.config.condensed_target_tokens && currentChunk.length > 0) {
+          chunks.push(currentChunk);
+          currentChunk = [];
+          currentTokens = 0;
+        }
+        currentChunk.push(node);
+        currentTokens += node.tokens;
+      }
+      if (currentChunk.length > 0) {
+        chunks.push(currentChunk);
+      }
+
+      for (const chunk of chunks) {
+        const text = chunk.map(n => n.content).join('\n\n---\n\n');
+        const summary = await this.summarize(text);
+        const sourceIds = chunk.map(n => n.id);
+        const now = Date.now();
+
+        this.database.transaction(() => {
+          this.summaryStore.add({
+            userId,
+            depth: depth + 1,
+            content: summary,
+            sourceIds,
+            tokens: estimateTokens(summary),
+          });
+          this.summaryStore.markCondensed(sourceIds, now);
         });
-        this.summaryStore.markCondensed(sourceIds, now);
-      });
 
-      stats.condensedNodesCreated++;
+        stats.condensedNodesCreated++;
+      }
+
       depth++;
     }
   }
