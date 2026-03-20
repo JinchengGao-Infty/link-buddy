@@ -145,7 +145,11 @@ export async function bootstrap(configDir?: string): Promise<BootstrapResult> {
     skillMcpServer.args.push('--apple-helper', helperPath);
   }
 
-  const skillNudge = 'You have access to reusable skills (prefixed skill_) and can create new ones with create_skill. When you solve a novel problem that could be reusable, consider creating a skill for it.\n\nFor image generation requests, use the skill_generate_image tool directly with a descriptive prompt. Do not deliberate — just call the tool.';
+  const skillNudge = [
+    'You have access to reusable skills (prefixed skill_) and can create new ones with create_skill. When you solve a novel problem that could be reusable, consider creating a skill for it.',
+    'For image generation requests, use the skill_generate_image tool directly with a descriptive prompt. Do not deliberate — just call the tool.',
+    config.apple.enabled ? 'You have Apple ecosystem tools available: apple_calendar_list, apple_calendar_search, apple_calendar_create, apple_calendar_update, apple_calendar_delete, apple_reminders_list, apple_reminders_create, apple_reminders_complete, apple_reminders_delete, apple_notes_search, apple_notes_read, apple_notes_create, apple_shortcuts_list, apple_shortcuts_run. Use these directly when the user asks about calendar events, reminders, notes, or shortcuts. Do NOT claim these tools are unavailable — they are always available.' : '',
+  ].filter(Boolean).join('\n\n');
 
   // 8. Create Gateway with injected dependencies
   const gateway = new Gateway({
