@@ -1,6 +1,6 @@
 import { join, dirname } from 'node:path';
 import { writeFileSync, renameSync } from 'node:fs';
-import { loadConfig, createEventBus, UserManager } from '@ccbuddy/core';
+import { loadConfig, createEventBus, UserManager, TranscriptionService, SpeechService } from '@ccbuddy/core';
 import { AgentService, CliBackend } from '@ccbuddy/agent';
 import {
   MemoryDatabase,
@@ -147,6 +147,18 @@ export async function bootstrap(configDir?: string): Promise<BootstrapResult> {
 
   const skillNudge = 'You have access to reusable skills (prefixed skill_) and can create new ones with create_skill. When you solve a novel problem that could be reusable, consider creating a skill for it.\n\nFor image generation requests, use the skill_generate_image tool directly with a descriptive prompt. Do not deliberate — just call the tool.';
 
+  // 7c. Voice services (optional)
+  let transcriptionService: TranscriptionService | undefined;
+  let speechService: SpeechService | undefined;
+  if (config.media.voice_enabled) {
+    const openaiKey = process.env.OPENAI_API_KEY;
+    if (!openaiKey) {
+      throw new Error('voice_enabled is true but OPENAI_API_KEY is not set');
+    }
+    transcriptionService = new TranscriptionService(openaiKey);
+    speechService = new SpeechService(openaiKey);
+  }
+
   // 8. Create Gateway with injected dependencies
   const gateway = new Gateway({
     eventBus,
@@ -175,6 +187,9 @@ export async function bootstrap(configDir?: string): Promise<BootstrapResult> {
     gatewayConfig: config.gateway,
     platformsConfig: config.platforms,
     outboundMediaDir: join(config.data_dir, 'outbound'),
+    transcriptionService,
+    speechService,
+    voiceConfig: { enabled: config.media.voice_enabled, ttsMaxChars: config.media.tts_max_chars },
   });
 
   // 9. Create and register platform adapters based on config

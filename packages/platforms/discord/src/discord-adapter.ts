@@ -78,6 +78,15 @@ export class DiscordAdapter implements PlatformAdapter {
     }
   }
 
+  async sendVoice(channelId: string, audio: Buffer): Promise<void> {
+    const channel = await this.fetchTextChannel(channelId);
+    if (channel) {
+      await channel.send({
+        files: [{ attachment: audio, name: 'voice.ogg' }],
+      });
+    }
+  }
+
   async setTypingIndicator(channelId: string, active: boolean): Promise<void> {
     if (!active) return;
     const channel = await this.fetchTextChannel(channelId);
@@ -100,9 +109,13 @@ export class DiscordAdapter implements PlatformAdapter {
         const data = await fetchAttachment(att.url, {
           maxBytes: this.config.mediaConfig.max_file_size_mb * 1024 * 1024,
         });
+        const mimeType = att.contentType ?? 'application/octet-stream';
+        const attachmentType = mimeType.startsWith('image/') ? 'image'
+          : mimeType.startsWith('audio/') ? 'voice'
+          : 'file';
         const attachment: Attachment = {
-          type: att.contentType?.startsWith('image/') ? 'image' : 'file',
-          mimeType: att.contentType ?? 'application/octet-stream',
+          type: attachmentType,
+          mimeType,
           data,
           filename: att.name ?? undefined,
         };

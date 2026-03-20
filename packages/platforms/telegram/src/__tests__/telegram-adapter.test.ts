@@ -3,9 +3,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const textHandlers: Function[] = [];
 const photoHandlers: Function[] = [];
 const documentHandlers: Function[] = [];
+const voiceHandlers: Function[] = [];
 const mockSendMessage = vi.fn().mockResolvedValue(undefined);
 const mockSendPhoto = vi.fn().mockResolvedValue(undefined);
 const mockSendDocument = vi.fn().mockResolvedValue(undefined);
+const mockSendVoice = vi.fn().mockResolvedValue(undefined);
 const mockSendChatAction = vi.fn().mockResolvedValue(undefined);
 const mockGetFile = vi.fn();
 const mockBotStart = vi.fn().mockResolvedValue(undefined);
@@ -17,6 +19,7 @@ vi.mock('grammy', () => ({
       if (filter === 'message:text') textHandlers.push(handler);
       if (filter === 'message:photo') photoHandlers.push(handler);
       if (filter === 'message:document') documentHandlers.push(handler);
+      if (filter === 'message:voice') voiceHandlers.push(handler);
     }),
     start: mockBotStart,
     stop: mockBotStop,
@@ -25,6 +28,7 @@ vi.mock('grammy', () => ({
       sendMessage: mockSendMessage,
       sendPhoto: mockSendPhoto,
       sendDocument: mockSendDocument,
+      sendVoice: mockSendVoice,
       sendChatAction: mockSendChatAction,
       getFile: mockGetFile,
     },
@@ -56,6 +60,8 @@ import type { IncomingMessage, MediaConfig } from '@ccbuddy/core';
 const testMediaConfig: MediaConfig = {
   max_file_size_mb: 10,
   allowed_mime_types: ['image/jpeg', 'image/png', 'application/pdf'],
+  voice_enabled: false,
+  tts_max_chars: 500,
 };
 
 function fakeTelegramCtx(overrides: Record<string, unknown> = {}) {
@@ -86,6 +92,7 @@ describe('TelegramAdapter', () => {
     textHandlers.length = 0;
     photoHandlers.length = 0;
     documentHandlers.length = 0;
+    voiceHandlers.length = 0;
     receivedMessages = [];
     adapter = new TelegramAdapter({ token: 'tg-token', mediaConfig: testMediaConfig });
     adapter.onMessage((msg) => receivedMessages.push(msg));
@@ -391,6 +398,140 @@ describe('TelegramAdapter', () => {
     });
   });
 
+  describe('voice messages', () => {
+    it('produces IncomingMessage with voice attachment for voice message', async () => {
+      mockGetFile.mockResolvedValue({ file_path: 'voice/file_abc.oga' });
+      mockFetchAttachment.mockResolvedValue(Buffer.from('voicedata'));
+
+      await adapter.start();
+
+      const ctx = {
+        ...fakeTelegramCtx(),
+        message: {
+          from: { id: 456 },
+          reply_to_message: null,
+          voice: {
+            file_id: 'voice_file_id',
+            mime_type: 'audio/ogg',
+            duration: 5,
+          },
+        },
+      };
+
+      await voiceHandlers[0](ctx);
+
+      expect(mockGetFile).toHaveBeenCalledWith('voice_file_id');
+      expect(mockFetchAttachment).toHaveBeenCalledWith(
+        'https://api.telegram.org/file/bottg-token/voice/file_abc.oga',
+        expect.objectContaining({ maxBytes: 10 * 1024 * 1024 }),
+      );
+      expect(receivedMessages).toHaveLength(1);
+      expect(receivedMessages[0]).toEqual(
+        expect.objectContaining({
+          platform: 'telegram',
+          platformUserId: '456',
+          channelId: '789',
+          text: '',
+          attachments: [
+            expect.objectContaining({
+              type: 'voice',
+              mimeType: 'audio/ogg',
+              data: Buffer.from('voicedata'),
+              filename: 'voice.ogg',
+            }),
+          ],
+        }),
+      );
+    });
+
+    it('falls back to audio/ogg when voice has no mime_type', async () => {
+      await adapter.start();
+
+      const ctx = {
+        ...fakeTelegramCtx(),
+        message: {
+          from: { id: 456 },
+          reply_to_message: null,
+          voice: {
+            file_id: 'voice_file_id',
+            mime_type: undefined,
+            duration: 3,
+          },
+        },
+      };
+
+      await voiceHandlers[0](ctx);
+
+      expect(receivedMessages[0].attachments[0].mimeType).toBe('audio/ogg');
+    });
+
+    it('skips voice attachment when validation fails', async () => {
+      mockValidateAttachment.mockReturnValue({ valid: false, reason: 'File too large' });
+      await adapter.start();
+
+      const ctx = {
+        ...fakeTelegramCtx(),
+        message: {
+          from: { id: 456 },
+          reply_to_message: null,
+          voice: {
+            file_id: 'voice_file_id',
+            mime_type: 'audio/ogg',
+            duration: 5,
+          },
+        },
+      };
+
+      await voiceHandlers[0](ctx);
+
+      expect(receivedMessages).toHaveLength(0);
+    });
+
+    it('skips voice attachment when getFile returns no file_path', async () => {
+      mockGetFile.mockResolvedValue({ file_path: undefined });
+      await adapter.start();
+
+      const ctx = {
+        ...fakeTelegramCtx(),
+        message: {
+          from: { id: 456 },
+          reply_to_message: null,
+          voice: {
+            file_id: 'voice_file_id',
+            mime_type: 'audio/ogg',
+            duration: 5,
+          },
+        },
+      };
+
+      await voiceHandlers[0](ctx);
+
+      expect(receivedMessages).toHaveLength(0);
+    });
+
+    it('skips voice attachment when download fails', async () => {
+      mockFetchAttachment.mockRejectedValue(new Error('Network error'));
+      await adapter.start();
+
+      const ctx = {
+        ...fakeTelegramCtx(),
+        message: {
+          from: { id: 456 },
+          reply_to_message: null,
+          voice: {
+            file_id: 'voice_file_id',
+            mime_type: 'audio/ogg',
+            duration: 5,
+          },
+        },
+      };
+
+      await voiceHandlers[0](ctx);
+
+      expect(receivedMessages).toHaveLength(0);
+    });
+  });
+
   describe('sending', () => {
     it('sends text message', async () => {
       await adapter.sendText('789', 'Hello');
@@ -413,6 +554,15 @@ describe('TelegramAdapter', () => {
       expect(mockSendDocument).toHaveBeenCalledWith(
         789,
         expect.objectContaining({ data: buf }),
+      );
+    });
+
+    it('sends voice', async () => {
+      const buf = Buffer.from('audiodata');
+      await adapter.sendVoice('789', buf);
+      expect(mockSendVoice).toHaveBeenCalledWith(
+        789,
+        expect.objectContaining({ data: buf, filename: 'voice.ogg' }),
       );
     });
 

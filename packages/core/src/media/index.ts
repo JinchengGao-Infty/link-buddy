@@ -6,3 +6,5 @@ export {
   type ImageContentBlock,
   type DocumentContentBlock,
 } from './conversion.js';
+export { TranscriptionService } from './transcription.js';
+export { SpeechService } from './speech.js';

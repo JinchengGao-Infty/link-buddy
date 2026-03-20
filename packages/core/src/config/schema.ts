@@ -84,6 +84,8 @@ export interface WebhooksConfig {
 export interface MediaConfig {
   max_file_size_mb: number;
   allowed_mime_types: string[];
+  voice_enabled: boolean;
+  tts_max_chars: number;
 }
 
 export interface ImageGenerationConfig {
@@ -207,6 +209,8 @@ export const DEFAULT_CONFIG: CCBuddyConfig = {
   media: {
     max_file_size_mb: 10,
     allowed_mime_types: ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'application/pdf'],
+    voice_enabled: false,
+    tts_max_chars: 500,
   },
   image_generation: {
     enabled: false,

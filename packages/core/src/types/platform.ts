@@ -20,5 +20,6 @@ export interface PlatformAdapter {
   sendText(channelId: string, text: string): Promise<void>;
   sendImage(channelId: string, image: Buffer, caption?: string): Promise<void>;
   sendFile(channelId: string, file: Buffer, filename: string): Promise<void>;
+  sendVoice?(channelId: string, audio: Buffer): Promise<void>;
   setTypingIndicator(channelId: string, active: boolean): Promise<void>;
 }

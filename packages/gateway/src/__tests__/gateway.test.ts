@@ -59,6 +59,43 @@ function createMockAdapter(platform = 'discord') {
   return adapter;
 }
 
+function createMockAdapterWithVoice(platform = 'discord') {
+  let messageHandler: ((msg: IncomingMessage) => void) | undefined;
+
+  const adapter: PlatformAdapter & {
+    sendVoice: ReturnType<typeof vi.fn>;
+    simulateMessage: (msg: IncomingMessage) => Promise<void>;
+  } = {
+    platform,
+    start: vi.fn().mockResolvedValue(undefined),
+    stop: vi.fn().mockResolvedValue(undefined),
+    onMessage: vi.fn().mockImplementation((handler: (msg: IncomingMessage) => void) => {
+      messageHandler = handler;
+    }),
+    sendText: vi.fn().mockResolvedValue(undefined),
+    sendImage: vi.fn().mockResolvedValue(undefined),
+    sendFile: vi.fn().mockResolvedValue(undefined),
+    sendVoice: vi.fn().mockResolvedValue(undefined),
+    setTypingIndicator: vi.fn().mockResolvedValue(undefined),
+    simulateMessage: async (msg: IncomingMessage) => {
+      if (messageHandler) {
+        await (messageHandler(msg) as unknown as Promise<void>);
+      }
+    },
+  };
+  return adapter;
+}
+
+function makeVoiceAttachment(transcript?: string) {
+  return {
+    type: 'voice' as const,
+    mimeType: 'audio/ogg',
+    data: Buffer.from('fake-audio'),
+    filename: 'voice.ogg',
+    transcript,
+  };
+}
+
 function makeIncomingMsg(overrides: Partial<IncomingMessage> = {}): IncomingMessage {
   return {
     platform: 'discord',
@@ -362,6 +399,186 @@ describe('Gateway', () => {
       gateway.registerAdapter(tgAdapter);
       await tgAdapter.simulateMessage(makeIncomingMsg({ platform: 'telegram' }));
       expect(tgAdapter.sendText).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('voice message handling', () => {
+    it('transcribes voice attachment and prepends transcript to prompt', async () => {
+      const mockTranscribe = vi.fn().mockResolvedValue('Hello from voice');
+      deps = createMockDeps({
+        transcriptionService: { transcribe: mockTranscribe },
+        speechService: { synthesize: vi.fn().mockResolvedValue(Buffer.from('audio')) },
+        voiceConfig: { enabled: true, ttsMaxChars: 500 },
+      });
+      gateway = new Gateway(deps);
+      const voiceAdapter = createMockAdapterWithVoice();
+      gateway.registerAdapter(voiceAdapter);
+
+      await voiceAdapter.simulateMessage(makeIncomingMsg({
+        text: '',
+        attachments: [makeVoiceAttachment()],
+      }));
+
+      expect(mockTranscribe).toHaveBeenCalledWith(
+        expect.any(Buffer),
+        'audio/ogg',
+      );
+      expect(deps.executeAgentRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ prompt: '[Voice message] Hello from voice' }),
+      );
+    });
+
+    it('prepends transcript to existing text when both present', async () => {
+      deps = createMockDeps({
+        transcriptionService: { transcribe: vi.fn().mockResolvedValue('voice content') },
+        speechService: { synthesize: vi.fn().mockResolvedValue(Buffer.from('audio')) },
+        voiceConfig: { enabled: true, ttsMaxChars: 500 },
+      });
+      gateway = new Gateway(deps);
+      const voiceAdapter = createMockAdapterWithVoice();
+      gateway.registerAdapter(voiceAdapter);
+
+      await voiceAdapter.simulateMessage(makeIncomingMsg({
+        text: 'Also typed this',
+        attachments: [makeVoiceAttachment()],
+      }));
+
+      expect(deps.executeAgentRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ prompt: 'Also typed this\n\n[Voice message] voice content' }),
+      );
+    });
+
+    it('sends voice response when input is voice and response is short (≤500 chars)', async () => {
+      const audioBuffer = Buffer.from('synthesized-audio');
+      const mockSynthesize = vi.fn().mockResolvedValue(audioBuffer);
+      deps = createMockDeps({
+        transcriptionService: { transcribe: vi.fn().mockResolvedValue('short voice') },
+        speechService: { synthesize: mockSynthesize },
+        voiceConfig: { enabled: true, ttsMaxChars: 500 },
+        executeAgentRequest: vi.fn().mockImplementation(async function* () {
+          yield {
+            type: 'complete' as const,
+            response: 'Short reply',
+            sessionId: 'dad-discord-ch1',
+            userId: 'Dad',
+            channelId: 'ch1',
+            platform: 'discord',
+          } satisfies AgentEvent;
+        }),
+      });
+      gateway = new Gateway(deps);
+      const voiceAdapter = createMockAdapterWithVoice();
+      gateway.registerAdapter(voiceAdapter);
+
+      await voiceAdapter.simulateMessage(makeIncomingMsg({
+        text: '',
+        attachments: [makeVoiceAttachment()],
+      }));
+
+      expect(mockSynthesize).toHaveBeenCalledWith('Short reply');
+      expect(voiceAdapter.sendVoice).toHaveBeenCalledWith('ch1', audioBuffer);
+      expect(voiceAdapter.sendText).not.toHaveBeenCalled();
+    });
+
+    it('sends voice for first part and text for remainder when response is long (>500 chars)', async () => {
+      const audioBuffer = Buffer.from('synthesized-audio');
+      const mockSynthesize = vi.fn().mockResolvedValue(audioBuffer);
+      const longResponse = 'x'.repeat(600);
+      deps = createMockDeps({
+        transcriptionService: { transcribe: vi.fn().mockResolvedValue('voice') },
+        speechService: { synthesize: mockSynthesize },
+        voiceConfig: { enabled: true, ttsMaxChars: 500 },
+        executeAgentRequest: vi.fn().mockImplementation(async function* () {
+          yield {
+            type: 'complete' as const,
+            response: longResponse,
+            sessionId: 'dad-discord-ch1',
+            userId: 'Dad',
+            channelId: 'ch1',
+            platform: 'discord',
+          } satisfies AgentEvent;
+        }),
+      });
+      gateway = new Gateway(deps);
+      const voiceAdapter = createMockAdapterWithVoice();
+      gateway.registerAdapter(voiceAdapter);
+
+      await voiceAdapter.simulateMessage(makeIncomingMsg({
+        text: '',
+        attachments: [makeVoiceAttachment()],
+      }));
+
+      expect(mockSynthesize).toHaveBeenCalledWith('x'.repeat(500));
+      expect(voiceAdapter.sendVoice).toHaveBeenCalledWith('ch1', audioBuffer);
+      expect(voiceAdapter.sendText).toHaveBeenCalledWith('ch1', 'x'.repeat(100));
+    });
+
+    it('sends text response when input is plain text (no voice attachment)', async () => {
+      const mockSynthesize = vi.fn().mockResolvedValue(Buffer.from('audio'));
+      deps = createMockDeps({
+        transcriptionService: { transcribe: vi.fn() },
+        speechService: { synthesize: mockSynthesize },
+        voiceConfig: { enabled: true, ttsMaxChars: 500 },
+      });
+      gateway = new Gateway(deps);
+      const voiceAdapter = createMockAdapterWithVoice();
+      gateway.registerAdapter(voiceAdapter);
+
+      await voiceAdapter.simulateMessage(makeIncomingMsg({ text: 'plain text', attachments: [] }));
+
+      expect(mockSynthesize).not.toHaveBeenCalled();
+      expect(voiceAdapter.sendVoice).not.toHaveBeenCalled();
+      expect(voiceAdapter.sendText).toHaveBeenCalledWith('ch1', 'Hello!');
+    });
+
+    it('does not transcribe when transcriptionService is not provided', async () => {
+      deps = createMockDeps({
+        transcriptionService: undefined,
+        speechService: { synthesize: vi.fn().mockResolvedValue(Buffer.from('audio')) },
+        voiceConfig: { enabled: true, ttsMaxChars: 500 },
+      });
+      gateway = new Gateway(deps);
+      const voiceAdapter = createMockAdapterWithVoice();
+      gateway.registerAdapter(voiceAdapter);
+
+      await voiceAdapter.simulateMessage(makeIncomingMsg({
+        text: '',
+        attachments: [makeVoiceAttachment()],
+      }));
+
+      // No transcription means voiceInput is false, response is sent as text
+      expect(voiceAdapter.sendText).toHaveBeenCalledWith('ch1', 'Hello!');
+    });
+
+    it('falls back to text when TTS fails', async () => {
+      const mockSynthesize = vi.fn().mockRejectedValue(new Error('TTS API error'));
+      deps = createMockDeps({
+        transcriptionService: { transcribe: vi.fn().mockResolvedValue('voice content') },
+        speechService: { synthesize: mockSynthesize },
+        voiceConfig: { enabled: true, ttsMaxChars: 500 },
+        executeAgentRequest: vi.fn().mockImplementation(async function* () {
+          yield {
+            type: 'complete' as const,
+            response: 'Short reply',
+            sessionId: 'dad-discord-ch1',
+            userId: 'Dad',
+            channelId: 'ch1',
+            platform: 'discord',
+          } satisfies AgentEvent;
+        }),
+      });
+      gateway = new Gateway(deps);
+      const voiceAdapter = createMockAdapterWithVoice();
+      gateway.registerAdapter(voiceAdapter);
+
+      await voiceAdapter.simulateMessage(makeIncomingMsg({
+        text: '',
+        attachments: [makeVoiceAttachment()],
+      }));
+
+      expect(mockSynthesize).toHaveBeenCalled();
+      expect(voiceAdapter.sendVoice).not.toHaveBeenCalled();
+      expect(voiceAdapter.sendText).toHaveBeenCalledWith('ch1', 'Short reply');
     });
   });
 });

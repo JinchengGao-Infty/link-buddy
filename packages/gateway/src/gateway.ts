@@ -10,6 +10,16 @@ import type {
   PlatformConfig,
   GatewayConfig,
 } from '@ccbuddy/core';
+
+/** Minimal transcription interface — satisfied by TranscriptionService from @ccbuddy/core */
+export interface Transcriber {
+  transcribe(audio: Buffer, mimeType: string): Promise<string>;
+}
+
+/** Minimal TTS interface — satisfied by SpeechService from @ccbuddy/core */
+export interface Synthesizer {
+  synthesize(text: string, voice?: string): Promise<Buffer>;
+}
 import { chunkMessage } from './chunker.js';
 import { shouldRespond } from './activation.js';
 
@@ -32,6 +42,9 @@ export interface GatewayDeps {
   gatewayConfig: GatewayConfig;
   platformsConfig: PlatformConfig;
   outboundMediaDir?: string;
+  transcriptionService?: Transcriber;
+  speechService?: Synthesizer;
+  voiceConfig?: { enabled: boolean; ttsMaxChars: number };
 }
 
 const PLATFORM_CHAR_LIMITS: Record<string, number> = {
@@ -155,11 +168,36 @@ export class Gateway {
       permissionLevel: user.role === 'admin' ? 'admin' : 'chat',
     };
 
+    // 7b. Transcribe voice attachments
+    let voiceInput = false;
+    if (this.deps.transcriptionService && msg.attachments.some(a => a.type === 'voice')) {
+      for (const att of msg.attachments) {
+        if (att.type === 'voice' && !att.transcript) {
+          try {
+            att.transcript = await this.deps.transcriptionService.transcribe(att.data, att.mimeType);
+          } catch (err) {
+            console.error('[Gateway] Transcription failed:', (err as Error).message);
+          }
+        }
+      }
+
+      const transcripts = msg.attachments
+        .filter(a => a.type === 'voice' && a.transcript)
+        .map(a => a.transcript!);
+      if (transcripts.length > 0) {
+        const transcriptText = transcripts.join(' ');
+        request.prompt = msg.text
+          ? `${msg.text}\n\n[Voice message] ${transcriptText}`
+          : `[Voice message] ${transcriptText}`;
+        voiceInput = true;
+      }
+    }
+
     // 8. Execute and route response
-    await this.executeAndRoute(request, msg);
+    await this.executeAndRoute(request, msg, voiceInput);
   }
 
-  private async executeAndRoute(request: AgentRequest, msg: IncomingMessage): Promise<void> {
+  private async executeAndRoute(request: AgentRequest, msg: IncomingMessage, voiceInput = false): Promise<void> {
     const adapter = this.adapters.get(msg.platform);
     if (!adapter) return;
 
@@ -185,10 +223,36 @@ export class Gateway {
               text: event.response,
             });
 
-            const limit = PLATFORM_CHAR_LIMITS[msg.platform] ?? DEFAULT_CHAR_LIMIT;
-            const chunks = chunkMessage(event.response, limit);
-            for (const chunk of chunks) {
-              await adapter.sendText(msg.channelId, chunk);
+            // Voice mirror logic
+            if (voiceInput && this.deps.speechService && adapter.sendVoice) {
+              const maxChars = this.deps.voiceConfig?.ttsMaxChars ?? 500;
+              if (event.response.length <= maxChars) {
+                try {
+                  const audio = await this.deps.speechService.synthesize(event.response);
+                  await adapter.sendVoice(msg.channelId, audio);
+                } catch (err) {
+                  console.error('[Gateway] TTS failed, falling back to text:', (err as Error).message);
+                  const limit = PLATFORM_CHAR_LIMITS[msg.platform] ?? DEFAULT_CHAR_LIMIT;
+                  const chunks = chunkMessage(event.response, limit);
+                  for (const chunk of chunks) await adapter.sendText(msg.channelId, chunk);
+                }
+              } else {
+                const voicePart = event.response.slice(0, maxChars);
+                const textPart = event.response.slice(maxChars);
+                try {
+                  const audio = await this.deps.speechService.synthesize(voicePart);
+                  await adapter.sendVoice(msg.channelId, audio);
+                } catch (err) {
+                  console.error('[Gateway] TTS failed:', (err as Error).message);
+                }
+                const limit = PLATFORM_CHAR_LIMITS[msg.platform] ?? DEFAULT_CHAR_LIMIT;
+                const chunks = chunkMessage(textPart, limit);
+                for (const chunk of chunks) await adapter.sendText(msg.channelId, chunk);
+              }
+            } else {
+              const limit = PLATFORM_CHAR_LIMITS[msg.platform] ?? DEFAULT_CHAR_LIMIT;
+              const chunks = chunkMessage(event.response, limit);
+              for (const chunk of chunks) await adapter.sendText(msg.channelId, chunk);
             }
 
             // Deliver any outbound media files (written by skills to data/outbound/)

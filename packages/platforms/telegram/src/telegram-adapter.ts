@@ -89,6 +89,25 @@ export class TelegramAdapter implements PlatformAdapter {
       });
     });
 
+    this.bot.on('message:voice', async (ctx) => {
+      if (!this.messageHandler) return;
+
+      const msg = ctx.message;
+      const chat = ctx.chat;
+      const voice = msg.voice;
+
+      await this.downloadAndDispatch({
+        fileId: voice.file_id,
+        mimeType: voice.mime_type ?? 'audio/ogg',
+        filename: 'voice.ogg',
+        text: '',
+        ctx,
+        chat,
+        msg,
+        attachmentTypeOverride: 'voice',
+      });
+    });
+
     await this.bot.start();
   }
 
@@ -115,6 +134,13 @@ export class TelegramAdapter implements PlatformAdapter {
     );
   }
 
+  async sendVoice(channelId: string, audio: Buffer): Promise<void> {
+    await this.bot.api.sendVoice(
+      Number(channelId),
+      new InputFile(audio, 'voice.ogg'),
+    );
+  }
+
   async setTypingIndicator(channelId: string, active: boolean): Promise<void> {
     if (!active) return;
     await this.bot.api.sendChatAction(Number(channelId), 'typing');
@@ -128,8 +154,9 @@ export class TelegramAdapter implements PlatformAdapter {
     ctx: unknown;
     chat: { id: number; type: string };
     msg: { from: { id: number }; reply_to_message?: { message_id: number } | null };
+    attachmentTypeOverride?: 'image' | 'file' | 'voice';
   }): Promise<void> {
-    const { fileId, mimeType, filename, text, ctx, chat, msg } = opts;
+    const { fileId, mimeType, filename, text, ctx, chat, msg, attachmentTypeOverride } = opts;
 
     const file = await (ctx as { api: { getFile(id: string): Promise<{ file_path?: string }> } }).api.getFile(fileId);
 
@@ -151,7 +178,7 @@ export class TelegramAdapter implements PlatformAdapter {
     }
 
     const attachment: Attachment = {
-      type: mimeType.startsWith('image/') ? 'image' : 'file',
+      type: attachmentTypeOverride ?? (mimeType.startsWith('image/') ? 'image' : 'file'),
       mimeType,
       data,
       filename,

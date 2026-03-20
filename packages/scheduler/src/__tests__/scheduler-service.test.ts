@@ -85,6 +85,8 @@ function createMinimalConfig(overrides: Partial<CCBuddyConfig> = {}): CCBuddyCon
     media: {
       max_file_size_mb: 10,
       allowed_mime_types: ['image/jpeg', 'image/png'],
+      voice_enabled: false,
+      tts_max_chars: 500,
     },
     image_generation: {
       enabled: false,

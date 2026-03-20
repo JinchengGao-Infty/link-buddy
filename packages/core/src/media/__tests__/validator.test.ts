@@ -6,6 +6,8 @@ import type { MediaConfig } from '../../config/schema.js';
 const config: MediaConfig = {
   max_file_size_mb: 10,
   allowed_mime_types: ['image/png', 'image/jpeg', 'application/pdf'],
+  voice_enabled: false,
+  tts_max_chars: 500,
 };
 
 function makeAttachment(overrides: Partial<Attachment> = {}): Attachment {

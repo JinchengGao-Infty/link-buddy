@@ -56,6 +56,8 @@ import type { IncomingMessage } from '@ccbuddy/core';
 const defaultMediaConfig = {
   max_file_size_mb: 10,
   allowed_mime_types: ['image/png', 'image/jpeg', 'application/pdf'],
+  voice_enabled: false,
+  tts_max_chars: 500,
 };
 
 function fakeDiscordMessage(overrides: Record<string, unknown> = {}) {
@@ -210,6 +212,24 @@ describe('DiscordAdapter', () => {
       expect(receivedMessages[0].attachments).toHaveLength(0);
     });
 
+    it('detects audio attachments as voice type', async () => {
+      const oggData = Buffer.from('ogg-bytes');
+      mockFetchAttachment.mockResolvedValueOnce(oggData);
+      mockValidateAttachment.mockReturnValue({ valid: true });
+
+      await adapter.start();
+      const handler = eventHandlers.get('messageCreate')!;
+      const attachments = new Map([
+        ['att1', { url: 'https://cdn.discord.com/voice.ogg', contentType: 'audio/ogg', name: 'voice.ogg' }],
+      ]);
+      handler(fakeDiscordMessage({ attachments }));
+      await flushMicrotasks();
+
+      expect(receivedMessages[0].attachments[0]).toEqual(
+        expect.objectContaining({ type: 'voice', mimeType: 'audio/ogg' }),
+      );
+    });
+
     it('skips attachments that fail to download', async () => {
       mockFetchAttachment.mockRejectedValue(new Error('network error'));
 
@@ -253,6 +273,14 @@ describe('DiscordAdapter', () => {
       await adapter.sendFile('ch1', buf, 'report.pdf');
       expect(mockSend).toHaveBeenCalledWith({
         files: [{ attachment: buf, name: 'report.pdf' }],
+      });
+    });
+
+    it('sends voice as ogg attachment', async () => {
+      const buf = Buffer.from('ogg-audio');
+      await adapter.sendVoice('ch1', buf);
+      expect(mockSend).toHaveBeenCalledWith({
+        files: [{ attachment: buf, name: 'voice.ogg' }],
       });
     });
 
