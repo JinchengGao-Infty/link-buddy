@@ -1,5 +1,25 @@
 import Foundation
 
+struct ReminderOutput: Codable {
+    let id: String
+    let title: String
+    let isCompleted: Bool
+    let dueDate: String?
+    let list: String
+    let notes: String
+    let priority: Int
+}
+
+struct ReminderListResult: Codable {
+    let success: Bool
+    let reminders: [ReminderOutput]
+}
+
+struct ReminderSingleResult: Codable {
+    let success: Bool
+    let reminder: ReminderOutput
+}
+
 struct CalendarEventOutput: Codable {
     let id: String
     let title: String

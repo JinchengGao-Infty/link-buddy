@@ -7,7 +7,7 @@ struct CCBuddyHelper: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "ccbuddy-helper",
         abstract: "CCBuddy native macOS helper",
-        subcommands: [CalendarCommand.self]
+        subcommands: [CalendarCommand.self, RemindersCommand.self]
     )
 }
 
@@ -21,6 +21,19 @@ struct CalendarCommand: ParsableCommand {
             CalendarCreate.self,
             CalendarUpdate.self,
             CalendarDelete.self,
+        ]
+    )
+}
+
+struct RemindersCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "reminders",
+        abstract: "Reminders operations",
+        subcommands: [
+            RemindersList.self,
+            RemindersCreate.self,
+            RemindersComplete.self,
+            RemindersDelete.self,
         ]
     )
 }
