@@ -101,7 +101,9 @@ export interface SkillsConfig {
 }
 
 export interface AppleConfig {
-  shortcuts_enabled: boolean;
+  enabled: boolean;
+  helper_path?: string;
+  shortcuts_enabled?: boolean;
 }
 
 export interface ScheduledJobConfig {
@@ -216,7 +218,7 @@ export const DEFAULT_CONFIG: CCBuddyConfig = {
     auto_git_commit: true,
   },
   apple: {
-    shortcuts_enabled: false,
+    enabled: false,
   },
   users: {},
 };
