@@ -45,6 +45,7 @@ Telegram ←→ Gateway ←→ Claude Code SDK Agent
 | `orchestrator` | launchd daemon management |
 | `skills` | Self-evolving skill system (MCP server) |
 | `apple` | Calendar & Reminders via Swift helper |
+| `memory-palace` | [Memory Palace](https://github.com/AGI-is-going-to-arrive/Memory-Palace) (git submodule) |
 
 ## Skip Reading This — It's the Age of AI
 

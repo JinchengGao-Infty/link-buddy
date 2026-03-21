@@ -1,0 +1,3 @@
+[submodule "packages/memory-palace"]
+	path = packages/memory-palace
+	url = https://github.com/AGI-is-going-to-arrive/Memory-Palace.git
