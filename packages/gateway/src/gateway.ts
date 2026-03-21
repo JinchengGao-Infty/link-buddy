@@ -45,6 +45,8 @@ export interface GatewayDeps {
   transcriptionService?: Transcriber;
   speechService?: Synthesizer;
   voiceConfig?: { enabled: boolean; ttsMaxChars: number };
+  /** Handle slash commands (/compact, /new). Return reply text, or null to skip. */
+  onCommand?: (command: string, userId: string, sessionId: string) => Promise<string | null>;
 }
 
 const PLATFORM_CHAR_LIMITS: Record<string, number> = {
@@ -119,6 +121,25 @@ export class Gateway {
 
     // 3. Build routing info
     const sessionId = this.deps.buildSessionId(user.name, msg.platform, msg.channelId);
+
+    // 3b. Intercept slash commands
+    const trimmed = msg.text.trim();
+    if (trimmed.startsWith('/') && this.deps.onCommand) {
+      const command = trimmed.split(/\s+/)[0].toLowerCase();
+      if (command === '/compact' || command === '/new') {
+        const adapter = this.adapters.get(msg.platform);
+        if (adapter) {
+          await adapter.setTypingIndicator(msg.channelId, true);
+          try {
+            const reply = await this.deps.onCommand(command, user.name, sessionId);
+            if (reply) await adapter.sendText(msg.channelId, reply);
+          } finally {
+            await adapter.setTypingIndicator(msg.channelId, false);
+          }
+        }
+        return;
+      }
+    }
 
     // 4. Publish incoming event
     await this.deps.eventBus.publish('message.incoming', {
@@ -209,6 +230,8 @@ export class Gateway {
     // Tool status tracking for live-editing a status message
     let statusMessageId: string | undefined;
     const toolLog: string[] = [];
+    // Track intermediate text already sent to avoid duplicating in final response
+    const sentIntermediateTexts: string[] = [];
 
     try {
       for await (const event of this.deps.executeAgentRequest(request)) {
@@ -233,7 +256,27 @@ export class Gateway {
             statusMessageId = await this.upsertStatusMessage(adapter, msg.channelId, statusMessageId, toolLog);
             break;
           }
+          case 'text': {
+            // Send intermediate text (e.g. "please grant Calendar access") to user
+            const text = event.content;
+            if (text.trim()) {
+              sentIntermediateTexts.push(text);
+              const limit = PLATFORM_CHAR_LIMITS[msg.platform] ?? DEFAULT_CHAR_LIMIT;
+              const chunks = chunkMessage(text, limit);
+              for (const chunk of chunks) await adapter.sendText(msg.channelId, chunk);
+            }
+            break;
+          }
           case 'complete': {
+            // Skip final response if it was already sent as intermediate text
+            let finalText = event.response;
+            for (const sent of sentIntermediateTexts) {
+              if (finalText === sent) {
+                finalText = '';
+                break;
+              }
+            }
+
             this.deps.storeMessage({
               userId: request.userId,
               sessionId: request.sessionId,
@@ -250,36 +293,38 @@ export class Gateway {
               text: event.response,
             });
 
-            // Voice mirror logic
-            if (voiceInput && this.deps.speechService && adapter.sendVoice) {
-              const maxChars = this.deps.voiceConfig?.ttsMaxChars ?? 500;
-              if (event.response.length <= maxChars) {
-                try {
-                  const audio = await this.deps.speechService.synthesize(event.response);
-                  await adapter.sendVoice(msg.channelId, audio);
-                } catch (err) {
-                  console.error('[Gateway] TTS failed, falling back to text:', (err as Error).message);
+            // Send final response (skip if already sent as intermediate text)
+            if (finalText.trim()) {
+              if (voiceInput && this.deps.speechService && adapter.sendVoice) {
+                const maxChars = this.deps.voiceConfig?.ttsMaxChars ?? 500;
+                if (finalText.length <= maxChars) {
+                  try {
+                    const audio = await this.deps.speechService.synthesize(finalText);
+                    await adapter.sendVoice(msg.channelId, audio);
+                  } catch (err) {
+                    console.error('[Gateway] TTS failed, falling back to text:', (err as Error).message);
+                    const limit = PLATFORM_CHAR_LIMITS[msg.platform] ?? DEFAULT_CHAR_LIMIT;
+                    const chunks = chunkMessage(finalText, limit);
+                    for (const chunk of chunks) await adapter.sendText(msg.channelId, chunk);
+                  }
+                } else {
+                  const voicePart = finalText.slice(0, maxChars);
+                  const textPart = finalText.slice(maxChars);
+                  try {
+                    const audio = await this.deps.speechService.synthesize(voicePart);
+                    await adapter.sendVoice(msg.channelId, audio);
+                  } catch (err) {
+                    console.error('[Gateway] TTS failed:', (err as Error).message);
+                  }
                   const limit = PLATFORM_CHAR_LIMITS[msg.platform] ?? DEFAULT_CHAR_LIMIT;
-                  const chunks = chunkMessage(event.response, limit);
+                  const chunks = chunkMessage(textPart, limit);
                   for (const chunk of chunks) await adapter.sendText(msg.channelId, chunk);
                 }
               } else {
-                const voicePart = event.response.slice(0, maxChars);
-                const textPart = event.response.slice(maxChars);
-                try {
-                  const audio = await this.deps.speechService.synthesize(voicePart);
-                  await adapter.sendVoice(msg.channelId, audio);
-                } catch (err) {
-                  console.error('[Gateway] TTS failed:', (err as Error).message);
-                }
                 const limit = PLATFORM_CHAR_LIMITS[msg.platform] ?? DEFAULT_CHAR_LIMIT;
-                const chunks = chunkMessage(textPart, limit);
+                const chunks = chunkMessage(finalText, limit);
                 for (const chunk of chunks) await adapter.sendText(msg.channelId, chunk);
               }
-            } else {
-              const limit = PLATFORM_CHAR_LIMITS[msg.platform] ?? DEFAULT_CHAR_LIMIT;
-              const chunks = chunkMessage(event.response, limit);
-              for (const chunk of chunks) await adapter.sendText(msg.channelId, chunk);
             }
 
             // Deliver any outbound media files (written by skills to data/outbound/)

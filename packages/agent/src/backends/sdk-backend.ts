@@ -111,6 +111,8 @@ export class SdkBackend implements AgentBackend {
               if (block.type === 'tool_use' && !activeTools.has(block.id)) {
                 activeTools.add(block.id);
                 yield { ...base, type: 'tool_use', tool: block.name, input: block.input };
+              } else if (block.type === 'text' && block.text) {
+                yield { ...base, type: 'text', content: block.text };
               }
             }
           }

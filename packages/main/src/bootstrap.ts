@@ -195,6 +195,24 @@ export async function bootstrap(configDir?: string): Promise<BootstrapResult> {
         attachments: params.attachments,
       });
     },
+    onCommand: async (command, userId, sessionId) => {
+      if (command === '/compact') {
+        const stats = await consolidationService.consolidate(userId);
+        const parts: string[] = ['Context compacted.'];
+        if (stats.messagesChunked > 0) parts.push(`${stats.messagesChunked} messages summarized`);
+        if (stats.leafNodesCreated > 0) parts.push(`${stats.leafNodesCreated} summary nodes created`);
+        if (stats.condensedNodesCreated > 0) parts.push(`${stats.condensedNodesCreated} condensed`);
+        return parts.join(' ');
+      }
+      if (command === '/new') {
+        // Consolidate first to preserve context as summaries
+        await consolidationService.consolidate(userId);
+        // Clear session messages so fresh tail is empty
+        const deleted = messageStore.deleteBySession(userId, sessionId);
+        return `New conversation started. (${deleted} messages archived)`;
+      }
+      return null;
+    },
     gatewayConfig: config.gateway,
     platformsConfig: config.platforms,
     outboundMediaDir: join(config.data_dir, 'outbound'),

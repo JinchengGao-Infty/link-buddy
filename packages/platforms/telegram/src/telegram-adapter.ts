@@ -115,7 +115,14 @@ export class TelegramAdapter implements PlatformAdapter {
       for (let i = 0; i < retries; i++) {
         try {
           await this.bot.start({
-            onStart: () => console.log('[TelegramAdapter] Bot polling started'),
+            onStart: () => {
+              console.log('[TelegramAdapter] Bot polling started');
+              // Register bot command menu (shown when user types '/')
+              this.bot.api.setMyCommands([
+                { command: 'compact', description: 'Compress conversation context' },
+                { command: 'new', description: 'Start a new conversation' },
+              ]).catch(err => console.warn('[TelegramAdapter] Failed to set commands:', err.message));
+            },
             allowed_updates: ['message'],
             drop_pending_updates: true,
           });

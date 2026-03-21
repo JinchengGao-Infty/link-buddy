@@ -118,6 +118,13 @@ export class MessageStore {
     return row.count;
   }
 
+  deleteBySession(userId: string, sessionId: string): number {
+    const result = this.db.raw().prepare(
+      'DELETE FROM messages WHERE user_id = ? AND session_id = ?'
+    ).run(userId, sessionId);
+    return result.changes;
+  }
+
   getDistinctUserIds(): string[] {
     const rows = this.db.raw().prepare(
       'SELECT DISTINCT user_id FROM messages'
