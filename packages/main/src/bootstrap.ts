@@ -1,5 +1,6 @@
-import { join, dirname } from 'node:path';
-import { writeFileSync, renameSync } from 'node:fs';
+import { join, dirname, resolve } from 'node:path';
+import { writeFileSync, renameSync, readFileSync, existsSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { loadConfig, createEventBus, UserManager, TranscriptionService, SpeechService } from '@ccbuddy/core';
 import { AgentService, CliBackend } from '@ccbuddy/agent';
 import {
@@ -154,7 +155,10 @@ export async function bootstrap(configDir?: string): Promise<BootstrapResult> {
       : undefined,
   };
 
-  const mcpServers = [skillMcpServer, memoryPalaceMcpServer];
+  // Load user-level MCP servers from ~/.claude.json (shared with Claude Code)
+  const userMcpServers = loadClaudeUserMcpServers();
+
+  const mcpServers = [skillMcpServer, memoryPalaceMcpServer, ...userMcpServers];
 
   const skillNudge = 'You have access to reusable skills (prefixed skill_) and can create new ones with create_skill. When you solve a novel problem that could be reusable, consider creating a skill for it.\n\nFor image generation requests, use the skill_generate_image tool directly with a descriptive prompt. Do not deliberate — just call the tool.';
 
@@ -343,4 +347,53 @@ export async function bootstrap(configDir?: string): Promise<BootstrapResult> {
       await shutdownHandler.execute();
     },
   };
+}
+
+/**
+ * Load user-level MCP servers from ~/.claude.json.
+ * This syncs Link Buddy with the same MCP servers registered in Claude Code.
+ * Skips servers that Link Buddy already manages (ccbuddy-skills, memory-palace).
+ */
+function loadClaudeUserMcpServers(): Array<import('@ccbuddy/core').McpServerSpec> {
+  const configPath = join(homedir(), '.claude.json');
+  if (!existsSync(configPath)) return [];
+
+  try {
+    const raw = JSON.parse(readFileSync(configPath, 'utf8'));
+    const servers: Record<string, any> = raw.mcpServers ?? {};
+
+    // Also merge project-level MCPs for the home directory (where Link Buddy typically runs)
+    const homeProject = raw.projects?.[homedir()]?.mcpServers;
+    if (homeProject) Object.assign(servers, homeProject);
+
+    const managed = new Set(['ccbuddy-skills', 'memory-palace']);
+    const result: Array<import('@ccbuddy/core').McpServerSpec> = [];
+
+    for (const [name, spec] of Object.entries(servers)) {
+      if (managed.has(name)) continue;
+
+      if (spec.type === 'sse') {
+        result.push({ name, type: 'sse', url: spec.url, headers: spec.headers });
+      } else if (spec.type === 'http') {
+        result.push({ name, type: 'http', url: spec.url, headers: spec.headers });
+      } else {
+        // stdio (default)
+        result.push({
+          name,
+          type: 'stdio',
+          command: spec.command ?? '',
+          args: spec.args ?? [],
+          env: spec.env,
+        });
+      }
+    }
+
+    if (result.length > 0) {
+      console.log(`[Bootstrap] Loaded ${result.length} MCP server(s) from ~/.claude.json: ${result.map(s => s.name).join(', ')}`);
+    }
+    return result;
+  } catch (err) {
+    console.warn('[Bootstrap] Failed to load ~/.claude.json MCP servers:', (err as Error).message);
+    return [];
+  }
 }
