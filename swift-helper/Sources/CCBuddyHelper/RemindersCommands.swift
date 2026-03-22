@@ -1,38 +1,7 @@
 import ArgumentParser
 import Foundation
 
-// MARK: - AppleScript helper (shared with CalendarCommands via same module)
-
-private func runAppleScript(_ script: String, app: String = "Reminders") throws -> String {
-    // Ensure the target app is running (needed for launchd/SSH contexts)
-    let openProc = Process()
-    openProc.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-    openProc.arguments = ["-gja", app]
-    try? openProc.run()
-    openProc.waitUntilExit()
-    Thread.sleep(forTimeInterval: 0.5)
-
-    let proc = Process()
-    proc.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-    proc.arguments = ["-e", script]
-    let pipe = Pipe()
-    proc.standardOutput = pipe
-    proc.standardError = pipe
-    try proc.run()
-    proc.waitUntilExit()
-    let data = pipe.fileHandleForReading.readDataToEndOfFile()
-    let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-    if proc.terminationStatus != 0 {
-        throw NSError(domain: "AppleScript", code: Int(proc.terminationStatus),
-                      userInfo: [NSLocalizedDescriptionKey: output])
-    }
-    return output
-}
-
-private func escapeAS(_ s: String) -> String {
-    return s.replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-}
+// Shared helpers are in AppleScriptUtils.swift
 
 // MARK: - List
 
@@ -46,7 +15,7 @@ struct RemindersList: ParsableCommand {
     var showCompleted: Bool = false
 
     func run() throws {
-        let listFilter = list.map { "of list \"\(escapeAS($0))\"" } ?? ""
+        let listFilter = list.map { "of list \"\(escapeForAppleScript($0))\"" } ?? ""
         let completedFilter = showCompleted ? "" : "whose completed is false"
 
         let script = """
@@ -74,7 +43,7 @@ struct RemindersList: ParsableCommand {
         return output
         """
 
-        let result = try runAppleScript(script)
+        let result = try runAppleScript(script, app: "Reminders")
         let reminders = parseRemindersOutput(result)
         printJSON(ReminderListResult(success: true, reminders: reminders))
     }
@@ -101,8 +70,8 @@ struct RemindersCreate: ParsableCommand {
     var priority: Int?
 
     func run() throws {
-        let titleEsc = escapeAS(title)
-        let listTarget = list.map { "list \"\(escapeAS($0))\"" } ?? "default list"
+        let titleEsc = escapeForAppleScript(title)
+        let listTarget = list.map { "list \"\(escapeForAppleScript($0))\"" } ?? "default list"
 
         var props = "name:\"\(titleEsc)\""
         if let p = priority { props += ", priority:\(p)" }
@@ -116,7 +85,7 @@ struct RemindersCreate: ParsableCommand {
             extraLines.append("set due date of newRem to date \"\(df.string(from: dueDate))\"")
         }
         if let n = notes {
-            extraLines.append("set body of newRem to \"\(escapeAS(n))\"")
+            extraLines.append("set body of newRem to \"\(escapeForAppleScript(n))\"")
         }
 
         let script = """
@@ -143,7 +112,7 @@ struct RemindersCreate: ParsableCommand {
         end tell
         """
 
-        let result = try runAppleScript(script)
+        let result = try runAppleScript(script, app: "Reminders")
         let reminders = parseRemindersOutput(result)
         if let reminder = reminders.first {
             printJSON(ReminderSingleResult(success: true, reminder: reminder))
@@ -162,7 +131,7 @@ struct RemindersComplete: ParsableCommand {
     var id: String
 
     func run() throws {
-        let idEsc = escapeAS(id)
+        let idEsc = escapeForAppleScript(id)
         let script = """
         tell application "Reminders"
             set targetRem to missing value
@@ -195,7 +164,7 @@ struct RemindersComplete: ParsableCommand {
         end tell
         """
 
-        let result = try runAppleScript(script)
+        let result = try runAppleScript(script, app: "Reminders")
         let reminders = parseRemindersOutput(result)
         if let reminder = reminders.first {
             printJSON(ReminderSingleResult(success: true, reminder: reminder))
@@ -214,7 +183,7 @@ struct RemindersDelete: ParsableCommand {
     var id: String
 
     func run() throws {
-        let idEsc = escapeAS(id)
+        let idEsc = escapeForAppleScript(id)
         let script = """
         tell application "Reminders"
             repeat with lst in lists
@@ -229,7 +198,7 @@ struct RemindersDelete: ParsableCommand {
             error "Reminder not found with ID: \(idEsc)"
         end tell
         """
-        _ = try runAppleScript(script)
+        _ = try runAppleScript(script, app: "Reminders")
         printJSON(SuccessResult(success: true))
     }
 }

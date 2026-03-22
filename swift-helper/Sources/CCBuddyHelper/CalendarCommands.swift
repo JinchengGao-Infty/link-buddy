@@ -1,41 +1,7 @@
 import ArgumentParser
 import Foundation
 
-// MARK: - AppleScript helpers
-
-private func ensureAppRunning(_ appName: String) {
-    let proc = Process()
-    proc.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-    proc.arguments = ["-gja", appName]
-    try? proc.run()
-    proc.waitUntilExit()
-    // Brief pause to let the app initialize
-    Thread.sleep(forTimeInterval: 0.5)
-}
-
-private func runAppleScript(_ script: String, app: String = "Calendar") throws -> String {
-    ensureAppRunning(app)
-    let proc = Process()
-    proc.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-    proc.arguments = ["-e", script]
-    let pipe = Pipe()
-    proc.standardOutput = pipe
-    proc.standardError = pipe
-    try proc.run()
-    proc.waitUntilExit()
-    let data = pipe.fileHandleForReading.readDataToEndOfFile()
-    let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-    if proc.terminationStatus != 0 {
-        throw NSError(domain: "AppleScript", code: Int(proc.terminationStatus),
-                      userInfo: [NSLocalizedDescriptionKey: output])
-    }
-    return output
-}
-
-private func escapeForAppleScript(_ s: String) -> String {
-    return s.replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-}
+// Shared helpers are in AppleScriptUtils.swift
 
 // MARK: - List
 
@@ -90,7 +56,7 @@ struct CalendarList: ParsableCommand {
         return output
         """
 
-        let result = try runAppleScript(script)
+        let result = try runAppleScript(script, app: "Calendar")
         let events = parseCalendarOutput(result)
         printJSON(EventListResult(success: true, events: events))
     }
@@ -158,7 +124,7 @@ struct CalendarSearch: ParsableCommand {
         return output
         """
 
-        let result = try runAppleScript(script)
+        let result = try runAppleScript(script, app: "Calendar")
         let events = parseCalendarOutput(result)
         printJSON(EventListResult(success: true, events: events))
     }
@@ -223,7 +189,7 @@ struct CalendarCreate: ParsableCommand {
         end tell
         """
 
-        let result = try runAppleScript(script)
+        let result = try runAppleScript(script, app: "Calendar")
         let events = parseCalendarOutput(result)
         if let event = events.first {
             printJSON(EventSingleResult(success: true, event: event))
@@ -308,7 +274,7 @@ struct CalendarUpdate: ParsableCommand {
         end tell
         """
 
-        let result = try runAppleScript(script)
+        let result = try runAppleScript(script, app: "Calendar")
         let events = parseCalendarOutput(result)
         if let event = events.first {
             printJSON(EventSingleResult(success: true, event: event))
@@ -342,20 +308,12 @@ struct CalendarDelete: ParsableCommand {
             error "Event not found with ID: \(idEsc)"
         end tell
         """
-        _ = try runAppleScript(script)
+        _ = try runAppleScript(script, app: "Calendar")
         printJSON(SuccessResult(success: true))
     }
 }
 
 // MARK: - Helpers
-
-private func formatDateForAppleScript(_ date: Date) -> String {
-    let df = DateFormatter()
-    df.locale = Locale.current
-    df.dateStyle = .long
-    df.timeStyle = .long
-    return df.string(from: date)
-}
 
 private func parseCalendarOutput(_ raw: String) -> [CalendarEventOutput] {
     guard !raw.isEmpty else { return [] }

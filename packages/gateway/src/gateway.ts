@@ -1,4 +1,5 @@
-import { readdirSync, readFileSync, unlinkSync } from 'node:fs';
+import { readdirSync, readFileSync, renameSync, mkdirSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type {
   EventBus,
@@ -452,7 +453,10 @@ export class Gateway {
         } else {
           await adapter.sendFile(channelId, data, file);
         }
-        unlinkSync(filePath); // clean up after delivery
+        // Move to Trash instead of deleting (per user rules)
+        const trashDir = join(homedir(), '.Trash');
+        try { mkdirSync(trashDir, { recursive: true }); } catch {}
+        renameSync(filePath, join(trashDir, file));
       } catch (err) {
         console.warn(`[Gateway] Failed to deliver outbound media ${file}:`, (err as Error).message);
       }

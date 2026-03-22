@@ -61,7 +61,9 @@ export class ContextAssembler {
     remainingBudget -= summaryTokens;
 
     // 3. Fill remaining budget with raw messages (newest first, as many as fit)
-    const allMessages = this.messages.getFreshTail(userId, sessionId, 100000);
+    // Estimate how many messages we need: assume ~200 tokens avg per message, fetch 2x for safety
+    const estimatedCount = Math.max(100, Math.ceil((remainingBudget / 200) * 2));
+    const allMessages = this.messages.getFreshTail(userId, sessionId, estimatedCount);
     const selectedMessages: StoredMessage[] = [];
     let messageTokens = 0;
 

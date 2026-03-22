@@ -23,6 +23,7 @@ export class ConsolidationService {
   private readonly config: MemoryConfig;
   private readonly summarize: (text: string) => Promise<string>;
   private readonly extractMemories?: (messages: string) => Promise<void>;
+  private readonly activeConsolidations = new Set<string>();
 
   constructor(deps: ConsolidationServiceDeps) {
     this.messageStore = deps.messageStore;
@@ -41,6 +42,21 @@ export class ConsolidationService {
       condensedNodesCreated: 0,
       messagesPruned: 0,
     };
+
+    // Prevent concurrent consolidation for the same user
+    if (this.activeConsolidations.has(userId)) {
+      console.log(`[Consolidation] Skipping ${userId}: already in progress`);
+      return stats;
+    }
+    this.activeConsolidations.add(userId);
+    try {
+      return await this._doConsolidate(userId, stats);
+    } finally {
+      this.activeConsolidations.delete(userId);
+    }
+  }
+
+  private async _doConsolidate(userId: string, stats: ConsolidationStats): Promise<ConsolidationStats> {
 
     // Phase 0: Extract important memories before compression
     if (this.extractMemories) {
