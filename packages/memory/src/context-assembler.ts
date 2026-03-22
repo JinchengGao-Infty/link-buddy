@@ -4,8 +4,8 @@ import { ProfileStore } from './profile-store.js';
 
 export interface ContextAssemblerConfig {
   maxContextTokens: number;
-  freshTailCount: number;
-  contextThreshold: number; // 0.0 - 1.0
+  freshTailCount: number; // kept for backward compat, but no longer the primary limit
+  contextThreshold: number; // 0.0 - 1.0: trigger compaction when stored tokens exceed this ratio
 }
 
 export interface AssembledContext {
@@ -35,37 +35,48 @@ export class ContextAssembler {
   }
 
   assemble(userId: string, sessionId: string): AssembledContext {
-    const { maxContextTokens, freshTailCount, contextThreshold } = this.config;
+    const { maxContextTokens, contextThreshold } = this.config;
 
     // 1. Get user profile text
     const profile = this.profiles.getAsContext(userId);
     const profileTokens = profile.length > 0 ? Math.ceil(profile.length / 4) : 0;
 
-    // 2. Get fresh tail (last N messages for this session)
-    const freshMessages = this.messages.getFreshTail(userId, sessionId, freshTailCount);
-    const freshTokens = freshMessages.reduce((sum, m) => sum + m.tokens, 0);
+    let remainingBudget = maxContextTokens - profileTokens;
 
-    // 3. Fill remaining token budget with summaries (prioritize higher depth = more condensed)
-    let remainingBudget = maxContextTokens - profileTokens - freshTokens;
-
-    // Get all summaries sorted by depth DESC (higher depth = more condensed, higher priority)
-    // then by timestamp DESC (newer = higher priority within same depth)
+    // 2. Get summaries first (compressed history, high priority)
     const allSummaries = this.getAllSummariesByPriority(userId);
     const selectedSummaries: SummaryNode[] = [];
+    let summaryTokens = 0;
 
+    // Reserve at least 50% of budget for raw messages
+    const summaryBudget = Math.floor(remainingBudget * 0.5);
     for (const node of allSummaries) {
-      if (remainingBudget <= 0) break;
-      if (node.tokens <= remainingBudget) {
+      if (summaryTokens >= summaryBudget) break;
+      if (summaryTokens + node.tokens <= summaryBudget) {
         selectedSummaries.push(node);
-        remainingBudget -= node.tokens;
+        summaryTokens += node.tokens;
       }
     }
 
-    // 4. Calculate totalTokens
-    const summaryTokens = selectedSummaries.reduce((sum, s) => sum + s.tokens, 0);
-    const totalTokens = profileTokens + freshTokens + summaryTokens;
+    remainingBudget -= summaryTokens;
 
-    // 5. Calculate needsCompaction: true when stored tokens exceed maxContextTokens * contextThreshold
+    // 3. Fill remaining budget with raw messages (newest first, as many as fit)
+    const allMessages = this.messages.getFreshTail(userId, sessionId, 100000);
+    const selectedMessages: StoredMessage[] = [];
+    let messageTokens = 0;
+
+    // Walk from newest to oldest, collecting messages until budget is exhausted
+    for (let i = allMessages.length - 1; i >= 0; i--) {
+      const msg = allMessages[i];
+      if (messageTokens + msg.tokens > remainingBudget) break;
+      selectedMessages.unshift(msg); // prepend to maintain chronological order
+      messageTokens += msg.tokens;
+    }
+
+    // 4. Calculate totals
+    const totalTokens = profileTokens + summaryTokens + messageTokens;
+
+    // 5. Compaction needed when stored tokens exceed threshold
     const storedMessageTokens = this.messages.getTotalTokens(userId);
     const storedSummaryTokens = this.summaries.getTotalTokens(userId);
     const totalStoredTokens = storedMessageTokens + storedSummaryTokens;
@@ -73,7 +84,7 @@ export class ContextAssembler {
 
     return {
       profile,
-      messages: freshMessages,
+      messages: selectedMessages,
       summaries: selectedSummaries,
       totalTokens,
       needsCompaction,
@@ -111,20 +122,13 @@ export class ContextAssembler {
   }
 
   private getAllSummariesByPriority(userId: string): SummaryNode[] {
-    // Get all summary nodes, sort by depth DESC then timestamp DESC
-    const allNodes: SummaryNode[] = [];
-
-    // Collect all nodes by iterating depth levels starting from highest
-    // We use a direct query approach via getRecent with a large limit and re-sort
     const raw = this.summaries.getRecent(userId, 10000);
-
     // Sort by depth DESC (higher = more condensed = higher priority),
     // then by timestamp DESC (newer first within same depth)
     raw.sort((a, b) => {
       if (b.depth !== a.depth) return b.depth - a.depth;
       return b.timestamp - a.timestamp;
     });
-
     return raw;
   }
 }

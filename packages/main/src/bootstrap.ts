@@ -180,6 +180,14 @@ export async function bootstrap(configDir?: string): Promise<BootstrapResult> {
     }),
     assembleContext: (userId, sessionId) => {
       const context = contextAssembler.assemble(userId, sessionId);
+      // Auto-compact when approaching token budget (like Claude Code)
+      if (context.needsCompaction) {
+        void consolidationService.consolidate(userId).then(stats => {
+          if (stats.leafNodesCreated > 0 || stats.condensedNodesCreated > 0) {
+            console.log(`[AutoCompact] ${userId}: ${stats.messagesChunked} msgs → ${stats.leafNodesCreated} summaries, ${stats.condensedNodesCreated} condensed`);
+          }
+        }).catch(err => console.error('[AutoCompact] Error:', err));
+      }
       return contextAssembler.formatAsPrompt(context);
     },
     storeMessage: (params) => {
