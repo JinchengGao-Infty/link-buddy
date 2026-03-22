@@ -9,3 +9,4 @@ data/
 .turbo/
 *.tsbuildinfo
 swift-helper/.build/
+.ace-tool/
