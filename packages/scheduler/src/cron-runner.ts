@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, watchFile, unwatchFile } from 'node:fs';
 import nodeCron, { type ScheduledTask } from 'node-cron';
 import type {
   EventBus,
@@ -23,6 +23,9 @@ export class CronRunner {
   private readonly tasks = new Map<string, ScheduledTask>();
   private readonly jobs = new Map<string, ScheduledJob>();
   private readonly opts: CronRunnerOptions;
+  private heartbeatConfigFile: string | null = null;
+  private heartbeatActiveHours: { start: string; end: string } | undefined;
+  private heartbeatFile: string = './HEARTBEAT.md';
 
   constructor(opts: CronRunnerOptions) {
     this.opts = opts;
@@ -69,7 +72,7 @@ export class CronRunner {
     }
   }
 
-  registerHeartbeat(config: HeartbeatJobConfig): void {
+  registerHeartbeat(config: HeartbeatJobConfig, configFile?: string): void {
     if (config.enabled === false) return;
     const target = config.target;
     if (!target) {
@@ -77,8 +80,8 @@ export class CronRunner {
       return;
     }
 
-    const heartbeatFile = config.heartbeat_file ?? './HEARTBEAT.md';
-    const activeHours = config.active_hours;
+    this.heartbeatFile = config.heartbeat_file ?? './HEARTBEAT.md';
+    this.heartbeatActiveHours = config.active_hours;
 
     const job: PromptJob = {
       name: 'heartbeat',
@@ -93,22 +96,57 @@ export class CronRunner {
       running: false,
     };
 
+    this.scheduleHeartbeatTask(job, config.cron);
+
+    // Watch heartbeat-config.json for runtime cron changes
+    if (configFile) {
+      this.heartbeatConfigFile = configFile;
+      this.watchHeartbeatConfig(configFile, job);
+    }
+  }
+
+  private scheduleHeartbeatTask(job: PromptJob, cron: string): void {
+    // Stop existing task if any
+    const existing = this.tasks.get('heartbeat');
+    if (existing) existing.stop();
+
     const task = nodeCron.schedule(
-      config.cron,
+      cron,
       () => {
-        // Active hours check
-        if (activeHours) {
+        if (this.heartbeatActiveHours) {
           const now = new Date();
           const hhmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-          if (hhmm < activeHours.start || hhmm >= activeHours.end) return;
+          if (hhmm < this.heartbeatActiveHours.start || hhmm >= this.heartbeatActiveHours.end) return;
         }
-        void this.executeHeartbeat(job, heartbeatFile);
+        void this.executeHeartbeat(job, this.heartbeatFile);
       },
       { timezone: this.opts.timezone },
     );
 
+    job.cron = cron;
     this.tasks.set('heartbeat', task);
     this.jobs.set('heartbeat', job);
+  }
+
+  private watchHeartbeatConfig(configFile: string, job: PromptJob): void {
+    watchFile(configFile, { interval: 5000 }, () => {
+      try {
+        const raw = readFileSync(configFile, 'utf-8').trim();
+        if (!raw) return;
+        const cfg = JSON.parse(raw) as { cron?: string; active_hours?: { start: string; end: string } };
+
+        if (cfg.cron && nodeCron.validate(cfg.cron) && cfg.cron !== job.cron) {
+          console.log(`[Heartbeat] Cron updated: ${job.cron} → ${cfg.cron}`);
+          this.scheduleHeartbeatTask(job, cfg.cron);
+        }
+
+        if (cfg.active_hours) {
+          this.heartbeatActiveHours = cfg.active_hours;
+        }
+      } catch {
+        // Ignore parse errors — file may be mid-write
+      }
+    });
   }
 
   private async executeHeartbeat(job: PromptJob, heartbeatFile: string): Promise<void> {
@@ -134,8 +172,8 @@ export class CronRunner {
         checklist,
       ].join('\n');
 
+      const memoryContext = this.opts.assembleContext(job.user, '*');
       const sessionId = `scheduler:heartbeat:${Date.now()}`;
-      const memoryContext = this.opts.assembleContext(job.user, sessionId);
       const request: AgentRequest = {
         prompt,
         userId: job.user,
@@ -173,11 +211,15 @@ export class CronRunner {
     }
     this.tasks.clear();
     this.jobs.clear();
+    if (this.heartbeatConfigFile) {
+      unwatchFile(this.heartbeatConfigFile);
+    }
   }
 
   private async executePromptJob(job: PromptJob): Promise<void> {
+    // Use '*' session to query across all sessions (scheduler has no single session)
+    const memoryContext = this.opts.assembleContext(job.user, '*');
     const sessionId = `scheduler:cron:${job.name}:${Date.now()}`;
-    const memoryContext = this.opts.assembleContext(job.user, sessionId);
 
     const request: AgentRequest = {
       prompt: job.payload,

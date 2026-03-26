@@ -1,3 +1,4 @@
+import { join } from 'node:path';
 import { CronRunner } from './cron-runner.js';
 import { HeartbeatMonitor } from './heartbeat.js';
 import { WebhookServer } from './webhook-server.js';
@@ -117,7 +118,8 @@ export class SchedulerService {
       return;
     }
 
-    this.cronRunner.registerHeartbeat({ ...hbConfig, target });
+    const configFile = join(this.deps.config.data_dir, 'heartbeat-config.json');
+    this.cronRunner.registerHeartbeat({ ...hbConfig, target }, configFile);
   }
 
   private startHeartbeat(): void {

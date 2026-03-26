@@ -152,6 +152,7 @@ Skip trivial chat, greetings, and debugging noise. If nothing noteworthy, do not
       ...(config.skills.auto_git_commit ? [] : ['--no-git-commit']),
       '--memory-db', config.memory.db_path,
       '--heartbeat-status-file', join(config.data_dir, 'heartbeat-status.json'),
+      '--heartbeat-config-file', join(config.data_dir, 'heartbeat-config.json'),
     ],
   };
 

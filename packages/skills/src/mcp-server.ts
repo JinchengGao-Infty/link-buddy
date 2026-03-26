@@ -18,7 +18,7 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 
 import { SkillRegistry } from './registry.js';
 import { SkillGenerator } from './generator.js';
@@ -37,6 +37,7 @@ function parseArgs(argv: string[]): {
   autoGitCommit: boolean;
   memoryDbPath: string;
   heartbeatStatusFile: string;
+  heartbeatConfigFile: string;
   appleHelperPath: string;
 } {
   let registryPath = '';
@@ -45,6 +46,7 @@ function parseArgs(argv: string[]): {
   let autoGitCommit = true;
   let memoryDbPath = '';
   let heartbeatStatusFile = '';
+  let heartbeatConfigFile = '';
   let appleHelperPath = '';
 
   for (let i = 0; i < argv.length; i++) {
@@ -67,6 +69,9 @@ function parseArgs(argv: string[]): {
       case '--heartbeat-status-file':
         heartbeatStatusFile = argv[++i] ?? '';
         break;
+      case '--heartbeat-config-file':
+        heartbeatConfigFile = argv[++i] ?? '';
+        break;
       case '--apple-helper':
         appleHelperPath = argv[++i] ?? '';
         break;
@@ -82,7 +87,7 @@ function parseArgs(argv: string[]): {
     process.exit(1);
   }
 
-  return { registryPath, skillsDir, requireApproval, autoGitCommit, memoryDbPath, heartbeatStatusFile, appleHelperPath };
+  return { registryPath, skillsDir, requireApproval, autoGitCommit, memoryDbPath, heartbeatStatusFile, heartbeatConfigFile, appleHelperPath };
 }
 
 // ── Elevated permission check ───────────────────────────────────────────────
@@ -237,6 +242,22 @@ async function main(): Promise<void> {
         name: 'system_health',
         description: 'Get the latest system health status from the heartbeat monitor. Returns module statuses (process, database, agent) and system metrics (cpu, memory, disk).',
         inputSchema: { type: 'object', properties: {} },
+      });
+    }
+
+    // Heartbeat config tool — set cron interval at runtime
+    if (args.heartbeatConfigFile) {
+      tools.push({
+        name: 'set_heartbeat',
+        description: 'Update heartbeat schedule at runtime. Change the cron expression and/or active hours without restarting. The checklist content is in HEARTBEAT.md (edit via file tools).',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            cron: { type: 'string', description: 'Cron expression (e.g. "0 */2 * * *" for every 2 hours, "*/30 * * * *" for every 30 min)' },
+            active_hours_start: { type: 'string', description: 'Active hours start in HH:MM (e.g. "09:00")' },
+            active_hours_end: { type: 'string', description: 'Active hours end in HH:MM (e.g. "23:00")' },
+          },
+        },
       });
     }
 
@@ -544,6 +565,41 @@ async function main(): Promise<void> {
     if (notesService && name === 'apple_notes_delete') {
       await notesService.deleteNote(toolArgs.name as string);
       return { content: [{ type: 'text', text: JSON.stringify({ success: true }) }] };
+    }
+
+    // ── set_heartbeat ───────────────────────────────────────────────────
+    if (name === 'set_heartbeat' && args.heartbeatConfigFile) {
+      const config: Record<string, unknown> = {};
+
+      // Read existing config
+      try {
+        const existing = JSON.parse(readFileSync(args.heartbeatConfigFile, 'utf-8'));
+        Object.assign(config, existing);
+      } catch {
+        // File doesn't exist yet — start fresh
+      }
+
+      if (toolArgs.cron) {
+        // Validate cron with node-cron (dynamic import to avoid bundling issues)
+        const cronExpr = toolArgs.cron as string;
+        // Basic validation: must have 5 or 6 fields
+        const fields = cronExpr.trim().split(/\s+/);
+        if (fields.length < 5 || fields.length > 6) {
+          return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: `Invalid cron expression: "${cronExpr}" (need 5-6 fields)` }) }] };
+        }
+        config.cron = cronExpr;
+      }
+
+      if (toolArgs.active_hours_start || toolArgs.active_hours_end) {
+        const existing_hours = (config.active_hours as { start?: string; end?: string }) ?? {};
+        config.active_hours = {
+          start: (toolArgs.active_hours_start as string) ?? existing_hours.start ?? '09:00',
+          end: (toolArgs.active_hours_end as string) ?? existing_hours.end ?? '23:00',
+        };
+      }
+
+      writeFileSync(args.heartbeatConfigFile, JSON.stringify(config, null, 2));
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, config }) }] };
     }
 
     // ── Unknown tool ──────────────────────────────────────────────────────

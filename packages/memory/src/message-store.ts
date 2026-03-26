@@ -61,6 +61,16 @@ export class MessageStore {
   }
 
   getFreshTail(userId: string, sessionId: string, limit: number): StoredMessage[] {
+    // sessionId '*' means cross-session (e.g. scheduler memory_review)
+    if (sessionId === '*') {
+      const rows = this.db.raw().prepare(`
+        SELECT * FROM messages
+        WHERE user_id = ? AND summarized_at IS NULL
+        ORDER BY timestamp DESC, id DESC
+        LIMIT ?
+      `).all(userId, limit);
+      return rows.reverse().map((r: any) => this.toMessage(r));
+    }
     // Only fetch unsummarized messages — summarized ones are already captured in summaries
     const rows = this.db.raw().prepare(`
       SELECT * FROM messages
